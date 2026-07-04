@@ -1610,6 +1610,8 @@ class App {
       loadStatus: this.$('load-status'),
       plotterColor: this.$('plotter-color'),
       btnSettings: this.$('btn-settings'),
+      stackDisplay: this.$('stack-display'),
+      pointersDisplay: this.$('pointers-display'),
     };
   }
 
@@ -2057,9 +2059,11 @@ class App {
     this._updateStatusBar();
     this._updateCurrentInsn();
     this._updateDisasmHighlights();
-    this._updateMemoryDump(parseInt(this.els.memAddr.value, 16) || 0x6000);
+    this._updateMemoryDump(parseInt(this.els.memAddr?.value, 16) || 0x6000);
     this._updateIO();
     this._updatePlotterUI();
+    this._updateStack();
+    this._updatePointers();
     this._renderPlotterCanvas();
   }
 
@@ -2249,12 +2253,68 @@ class App {
 
   /** Update plotter position info. */
   _updatePlotterUI() {
-    this.els.plotterPos.textContent = `X: ${this.plotter.xPos} Y: ${this.plotter.yPos}`;
-    this.els.plotterPen.textContent = `Перо: ${this.plotter.penDown ? 'Вниз' : 'Вверх'}`;
-    this.els.plotterPenNum.textContent = `Перо #${this.plotter.penNum + 1}`;
+    const set = (el, val) => { if (el) el.textContent = val; };
+    set(this.els.plotterPos, `X: ${this.plotter.xPos} Y: ${this.plotter.yPos}`);
+    set(this.els.plotterPen, `Перо: ${this.plotter.penDown ? 'Вниз' : 'Вверх'}`);
+    set(this.els.plotterPenNum, `Перо #${this.plotter.penNum + 1}`);
     const c = PEN_COLORS[this.plotter.penNum] || PEN_COLORS[0];
-    this.els.plotterColor.textContent = `${c.name}`;
-    this.els.plotterColor.style.color = c.stroke;
+    set(this.els.plotterColor, c.name);
+    if (this.els.plotterColor) this.els.plotterColor.style.color = c.stroke;
+  }
+
+  /** Stack view — последние 8 слов. */
+  _updateStack() {
+    const el = this.els.stackDisplay;
+    if (!el) return;
+    const sp = this.cpu.sp;
+    let html = '';
+    for (let i = 0; i < 8; i++) {
+      const addr = (sp + i * 2) & 0xffff;
+      const lo = this.mmu.peek(addr);
+      const hi = this.mmu.peek(addr + 1);
+      const val = (hi << 8) | lo;
+      const marker = i === 0 ? '→ SP' : '    ';
+      html += `<div style="display:flex;gap:8px;font:11px monospace">
+        <span style="color:var(--text-dim);min-width:40px">${marker}</span>
+        <span style="color:var(--hl);width:48px">$${addr.toString(16).padStart(4,'0').toUpperCase()}</span>
+        <span>$${val.toString(16).padStart(4,'0').toUpperCase()}</span>
+      </div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  /** Pointer preview — HL, DE, BC + SP, PC. */
+  _updatePointers() {
+    const el = this.els.pointersDisplay;
+    if (!el) return;
+    const s = this.cpu.getState();
+    const pw = (a) => (this.mmu.peek(a+1) << 8) | this.mmu.peek(a);
+    const pb = (a) => this.mmu.peek(a);
+    const pairs = [
+      { n: 'HL', v: (s.h << 8) | s.l },
+      { n: 'DE', v: (s.d << 8) | s.e },
+      { n: 'BC', v: (s.b << 8) | s.c },
+    ];
+    let html = '';
+    for (const p of pairs) {
+      html += `<div style="display:flex;gap:8px;font:11px monospace">
+        <span style="color:var(--cyan);width:24px">${p.n}</span>
+        <span style="color:var(--hl);width:48px">$${p.v.toString(16).padStart(4,'0').toUpperCase()}</span>
+        <span>→ [$${pw(p.v).toString(16).padStart(4,'0').toUpperCase()}]</span>
+        <span style="color:var(--text-dim)">B:$${pb(p.v).toString(16).padStart(2,'0').toUpperCase()}</span>
+      </div>`;
+    }
+    html += `<div style="display:flex;gap:8px;font:11px monospace">
+      <span style="color:var(--cyan);width:24px">SP</span>
+      <span style="color:var(--hl);width:48px">$${s.sp.toString(16).padStart(4,'0').toUpperCase()}</span>
+      <span>→ [$${pw(s.sp).toString(16).padStart(4,'0').toUpperCase()}]</span>
+    </div>
+    <div style="display:flex;gap:8px;font:11px monospace">
+      <span style="color:var(--cyan);width:24px">PC</span>
+      <span style="color:var(--hl);width:48px">$${s.pc.toString(16).padStart(4,'0').toUpperCase()}</span>
+      <span>→ [$${pw(s.pc).toString(16).padStart(4,'0').toUpperCase()}]</span>
+    </div>`;
+    el.innerHTML = html;
   }
 
   /** Draw accumulated plotter lines onto canvas. */
