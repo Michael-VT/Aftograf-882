@@ -6,22 +6,7 @@
 
 import { CPU8080 } from './cpu8080.js';
 import { MMU } from './memory.js';
-
-/* ═══════════════════════════════════════════════════════════════
- * Plotter State Watch Addresses
- *
- * Симулятор читает эти адреса из RAM (через MMU) чтобы отслеживать
- * состояние пера. Можно менять по мере анализа прошивки.
- * ═══════════════════════════════════════════════════════════════ */
-
-const PLOTTER_CFG = {
-  X_POS_LO: 0x6180,   // координата X, младший байт (SHLD target)
-  X_POS_HI: 0x6181,   // координата X, старший байт
-  Y_POS_LO: 0x61ca,   // координата Y, младший байт (LHLD source)
-  Y_POS_HI: 0x61cb,   // координата Y, старший байт
-  PEN_STATE: 0x63f0,  // bit 0 = перо вниз (1) / вверх (0)
-  PEN_COLOR: 0x61e8,  // номер пера/цвета (0-6)
-};
+import { SettingsManager, DEFAULTS } from './settings.js';
 
 const PEN_COLORS = [
   { name: 'Чёрный',   stroke: '#000000' },
@@ -264,8 +249,9 @@ class USART8251 {
  * PPI2 port B → auxiliary
  */
 class Plotter {
-  constructor(mmu) {
+  constructor(mmu, settings) {
     this.mmu = mmu;
+    this.settings = settings;
     this.x = 0; this.y = 0;
     this.penDown = false;
     this.penNum = 0;
@@ -281,14 +267,14 @@ class Plotter {
     this.lastMemColor = -1;
   }
 
-  /** Читает состояние из RAM по адресам PLOTTER_CFG. */
   syncFromMemory() {
-    const xLo = this.mmu.peek(PLOTTER_CFG.X_POS_LO);
-    const xHi = this.mmu.peek(PLOTTER_CFG.X_POS_HI);
-    const yLo = this.mmu.peek(PLOTTER_CFG.Y_POS_LO);
-    const yHi = this.mmu.peek(PLOTTER_CFG.Y_POS_HI);
-    const pState = this.mmu.peek(PLOTTER_CFG.PEN_STATE);
-    const pColor = this.mmu.peek(PLOTTER_CFG.PEN_COLOR);
+    const s = this.settings;
+    const xLo = this.mmu.peek(s.getAddr('X_POS_LO'));
+    const xHi = this.mmu.peek(s.getAddr('X_POS_HI'));
+    const yLo = this.mmu.peek(s.getAddr('Y_POS_LO'));
+    const yHi = this.mmu.peek(s.getAddr('Y_POS_HI'));
+    const pState = this.mmu.peek(s.getAddr('PEN_STATE'));
+    const pColor = this.mmu.peek(s.getAddr('PEN_COLOR'));
 
     const memX = (xHi << 8) | xLo;
     const memY = (yHi << 8) | yLo;
@@ -549,6 +535,9 @@ const PORT_NAMES = {
 
 class App {
   constructor() {
+
+    // Settings (из localStorage)
+    this.settings = new SettingsManager();
     // I/O devices
     this.ppi1 = new PPI8255('PPI1');
     this.ppi2 = new PPI8255('PPI2');
@@ -565,7 +554,7 @@ class App {
     );
 
     // Plotter
-    this.plotter = new Plotter(this.mmu);
+    this.plotter = new Plotter(this.mmu, this.settings);
 
     // State
     this.running = false;
@@ -627,6 +616,7 @@ class App {
       plotterPenNum: this.$('plotter-pen-num'),
       loadStatus: this.$('load-status'),
       plotterColor: this.$('plotter-color'),
+      btnSettings: this.$('btn-settings'),
     };
   }
 
@@ -641,6 +631,7 @@ class App {
       this.els.speedLabel.textContent = speeds[idx];
     });
     this.els.btnLoadRom.addEventListener('click', () => this.els.romFileInput.click());
+    this.els.btnSettings.addEventListener('click', () => this._openSettings());
     this.els.romFileInput.addEventListener('change', (e) => this._handleROMFiles(e));
     this.els.asmSearch.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -753,7 +744,187 @@ class App {
       setTimeout(() => { el.style.display = 'none'; }, 5000);
     }
   }
-    this.els.btnStep.disabled = false;
+
+  /* ═══════════════════════════════════
+   * Settings Panel
+   * ═══════════════════════════════════ */
+
+  _openSettings() {
+    // Уже открыта?
+    if (document.getElementById('settings-overlay')) return;
+
+    // Вставляем HTML панели
+    const div = document.createElement('div');
+    div.innerHTML = this.settings.renderPanel();
+    document.body.appendChild(div.firstElementChild);
+
+    this._bindSettingsEvents();
+  }
+
+  _closeSettings() {
+    const overlay = document.getElementById('settings-overlay');
+    if (!overlay) return;
+
+    // Применяем изменения адресов переменных
+    document.querySelectorAll('.cfg-var-addr').forEach(inp => {
+      const key = inp.dataset.key;
+      const raw = inp.value.replace(/^\$/, '');
+      const addr = parseInt(raw, 16);
+      if (!isNaN(addr)) this.settings.setAddr(key, addr);
+    });
+
+    // Применяем изменения адресов чипов
+    document.querySelectorAll('.cfg-chip-offset').forEach(inp => {
+      const idx = parseInt(inp.dataset.idx);
+      const raw = inp.value.replace(/^\$/, '');
+      const offset = parseInt(raw, 16);
+      if (!isNaN(offset)) this.settings.setChipOffset(idx, offset);
+    });
+
+    this.settings.save();
+    overlay.remove();
+  }
+
+  _bindSettingsEvents() {
+    const overlay = document.getElementById('settings-overlay');
+    if (!overlay) return;
+
+    // Закрытие
+    overlay.querySelector('#settings-close').addEventListener('click', () => this._closeSettings());
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this._closeSettings();
+    });
+    // Escape
+    const onKey = (e) => { if (e.key === 'Escape') this._closeSettings(); };
+    document.addEventListener('keydown', onKey);
+    // Clean up listener when closed
+    const origClose = this._closeSettings.bind(this);
+    this._closeSettings = () => { document.removeEventListener('keydown', onKey); origClose(); };
+
+    // Загрузка ROM из настроек
+    const loadBtn = overlay.querySelector('#settings-load-rom');
+    const fileInput = overlay.querySelector('#settings-rom-input');
+    loadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => this._handleSettingsROM(e, overlay));
+
+    // Сохранить / Сбросить
+    overlay.querySelector('#settings-save').addEventListener('click', () => {
+      this._closeSettings();
+      this._setLoadStatus('Настройки сохранены', 'ok');
+    });
+    overlay.querySelector('#settings-reset').addEventListener('click', () => {
+      this.settings.reset();
+      overlay.remove();
+      this._openSettings();
+      this._setLoadStatus('Настройки сброшены', 'ok');
+    });
+
+    // Кастомные переменные
+    overlay.querySelector('#settings-custom-add').addEventListener('click', () => {
+      this.settings.addCustom('var' + (this.settings.config.custom.length + 1), 0x6000);
+      overlay.remove();
+      this._openSettings();
+    });
+    overlay.querySelector('#settings-custom-remove')?.addEventListener('click', (e) => {
+      if (e.target.classList.contains('cfg-custom-remove')) {
+        this.settings.removeCustom(parseInt(e.target.dataset.id));
+        overlay.remove();
+        this._openSettings();
+      }
+    });
+    // Delegate remove clicks on table
+    // Use event delegation for remove buttons
+    overlay.querySelector('#custom-vars-table tbody').addEventListener('click', (e) => {
+      const btn = e.target.closest('.cfg-custom-remove');
+      if (btn) {
+        this.settings.removeCustom(parseInt(btn.dataset.id));
+        overlay.remove();
+        this._openSettings();
+      }
+    });
+
+    // Чтение кастомных переменных
+    overlay.querySelector('#settings-custom-read').addEventListener('click', () => {
+      this._readCustomVars(overlay);
+    });
+  }
+
+  async _handleSettingsROM(event, overlay) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const addrInput = overlay.querySelector('#settings-load-addr');
+    const rawAddr = addrInput.value.replace(/^\$/, '');
+    const loadAddr = parseInt(rawAddr, 16) || 0;
+    const statusEl = overlay.querySelector('#settings-load-status');
+
+    try {
+      const buf = await files[0].arrayBuffer();
+      const data = new Uint8Array(buf);
+      const sizeKB = (data.length / 1024).toFixed(1);
+
+      // Создаём новый MMU
+      this.mmu = new MMU(this.ppi1, this.ppi2, this.pit, this.uart);
+
+      // Загружаем по указанному адресу
+      this.mmu.loadROM(data, loadAddr);
+
+      // Если файл 24KB, загружаем в $0000 (все 3 чипа)
+      // Если файл 8KB — в указанный адрес
+
+      this.romLoaded = true;
+      this.cpu = new CPU8080(
+        (addr) => this.mmu.readByte(addr),
+        (addr, val) => this.mmu.writeByte(addr, val)
+      );
+      this.plotter.reset();
+      this.breakpoints.clear();
+      this._resetState();
+      this._rebuildDisasm(loadAddr);
+      this._updateAll();
+      this.els.btnStep.disabled = false;
+
+      statusEl.textContent = `✓ Загружено ${sizeKB}KB по адресу $${loadAddr.toString(16).padStart(4,'0').toUpperCase()}`;
+      statusEl.style.display = 'block';
+      statusEl.className = 'load-status-ok';
+    } catch (e) {
+      statusEl.textContent = `✕ Ошибка: ${e.message}`;
+      statusEl.style.display = 'block';
+      statusEl.className = 'load-status-error';
+    }
+  }
+
+  _readCustomVars(overlay) {
+    const readout = overlay.querySelector('#custom-readout');
+    const custom = this.settings.config.custom;
+    if (custom.length === 0) {
+      readout.innerHTML = '<div style="color:var(--text-dim)">Нет переменных для чтения</div>';
+      return;
+    }
+
+    // Читаем текущие значения из input'ов (могут быть изменены)
+    overlay.querySelectorAll('.cfg-custom-addr').forEach(inp => {
+      const id = parseInt(inp.dataset.id);
+      const raw = inp.value.replace(/^\$/, '');
+      const addr = parseInt(raw, 16);
+      const c = custom.find(c => c.id === id);
+      if (c && !isNaN(addr)) c.addr = addr;
+    });
+
+    let html = '';
+    for (const c of custom) {
+      let val;
+      if (c.size === 2) {
+        const lo = this.mmu.peek(c.addr);
+        const hi = this.mmu.peek(c.addr + 1);
+        val = (hi << 8) | lo;
+        html += `<div class="readout-row"><span class="readout-name">${c.name}:</span><span>$${val.toString(16).padStart(4,'0').toUpperCase()} (${val})</span></div>`;
+      } else {
+        val = this.mmu.peek(c.addr);
+        html += `<div class="readout-row"><span class="readout-name">${c.name}:</span><span>$${val.toString(16).padStart(2,'0').toUpperCase()} (${val})</span></div>`;
+      }
+    }
+    readout.innerHTML = html;
   }
 
   /** Reset CPU and state. */
