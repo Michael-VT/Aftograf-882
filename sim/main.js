@@ -399,7 +399,7 @@ function buildDisasmTable() {
   const T = new Array(256);
 
   function def(code, mnem, size) {
-    T[code] = { mnem, size };
+    T[code] = { mnemonic: mnem, size };
   }
 
   for (let d = 0; d < 8; d++) {
