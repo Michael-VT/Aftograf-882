@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Autograf-882 — Debug Simulator</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Автограф-882 отладчик</h1>
+    <div id="status-bar">
+      <span id="status" class="status-stopped">STOPPED</span>
+      <span id="cycle-count">0 T-states</span>
+      <span id="ip-display">PC: ----</span>
+    </div>
+  </header>
+
+  <div id="main-layout">
+    <!-- Left column: registers + controls -->
+    <div id="left-panel">
+      <section id="controls">
+        <h2>Управление</h2>
+        <div class="btn-row">
+          <button id="btn-reset" class="ctrl-btn">↺ Reset</button>
+          <button id="btn-step" class="ctrl-btn">→ Step</button>
+        </div>
+        <div class="btn-row">
+          <button id="btn-run" class="ctrl-btn">▶ Run</button>
+          <button id="btn-pause" class="ctrl-btn" disabled>⏸ Pause</button>
+        </div>
+        <div class="speed-row">
+          <label for="speed-slider">Скорость:</label>
+          <input type="range" id="speed-slider" min="0" max="5" step="1" value="2">
+          <span id="speed-label">1 KHz</span>
+        </div>
+        <div class="btn-row">
+          <button id="btn-load-rom" class="ctrl-btn">📂 Загрузить прошивку</button>
+          <input type="file" id="rom-file-input" accept=".bin" multiple style="display:none">
+        </div>
+      </section>
+
+      <section id="registers">
+        <h2>Регистры CPU</h2>
+        <table id="reg-table">
+          <tr><td>A</td><td id="reg-a" class="reg-val">00</td><td>F</td><td id="reg-f" class="reg-val">00</td></tr>
+          <tr><td>B</td><td id="reg-b" class="reg-val">00</td><td>C</td><td id="reg-c" class="reg-val">00</td></tr>
+          <tr><td>D</td><td id="reg-d" class="reg-val">00</td><td>E</td><td id="reg-e" class="reg-val">00</td></tr>
+          <tr><td>H</td><td id="reg-h" class="reg-val">00</td><td>L</td><td id="reg-l" class="reg-val">00</td></tr>
+          <tr><td>SP</td><td id="reg-sp" class="reg-val" colspan="3">0000</td></tr>
+          <tr><td>PC</td><td id="reg-pc" class="reg-val hl-pc" colspan="3">0000</td></tr>
+        </table>
+        <div id="flags">
+          <span class="flag" id="flag-s">S</span>
+          <span class="flag" id="flag-z">Z</span>
+          <span class="flag" id="flag-ac">AC</span>
+          <span class="flag" id="flag-p">P</span>
+          <span class="flag" id="flag-cy">CY</span>
+        </div>
+      </section>
+
+      <section id="last-instruction">
+        <h2>Текущая инструкция</h2>
+        <div id="current-insn" class="insn-display">—</div>
+        <div id="current-bytes" class="bytes-display"></div>
+      </section>
+    </div>
+
+    <!-- Center: disassembly -->
+    <div id="center-panel">
+      <section id="disasm-section">
+        <h2>Дизассемблер</h2>
+        <div id="toolbar-asm">
+          <label for="asm-search">🔍</label>
+          <input type="text" id="asm-search" placeholder="Поиск адреса (hex)">
+          <label>
+            <input type="checkbox" id="asm-follow-pc" checked> Следить за PC
+          </label>
+        </div>
+        <div id="asm-list"></div>
+      </section>
+    </div>
+
+    <!-- Right column: memory + plotter canvas -->
+    <div id="right-panel">
+      <section id="memory-section">
+        <h2>Память</h2>
+        <div id="toolbar-mem">
+          <label for="mem-addr">Адрес:</label>
+          <input type="text" id="mem-addr" value="6000" size="6">
+          <button id="mem-refresh" class="small-btn">⟳</button>
+        </div>
+        <div id="mem-dump"></div>
+      </section>
+
+      <section id="io-section">
+        <h2>Устройства I/O</h2>
+        <div id="io-panel"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Bottom: Plotter canvas -->
+  <div id="plotter-section">
+    <h2>Плоттер</h2>
+    <div id="plotter-container">
+      <canvas id="plotter-canvas" width="800" height="500"></canvas>
+      <div id="plotter-info">
+        <span id="plotter-pos">X: 0 Y: 0</span>
+        <span id="plotter-pen">Перо: Вверх</span>
+        <span id="plotter-pen-num">Перо #1</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>

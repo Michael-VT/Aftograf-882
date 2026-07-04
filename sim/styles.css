@@ -1,0 +1,424 @@
+/* Autograf-882 Debug Simulator — Dark theme */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #1a1b26;
+  --panel-bg: #24283b;
+  --border: #414868;
+  --text: #c0caf5;
+  --text-dim: #565f89;
+  --hl: #7aa2f7;
+  --green: #9ece6a;
+  --red: #f7768e;
+  --yellow: #e0af68;
+  --cyan: #7dcfff;
+  --orange: #ff9e64;
+  --purple: #bb9af7;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --font-ui: 'Segoe UI', system-ui, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  overflow-x: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Header */
+header {
+  padding: 8px 16px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-shrink: 0;
+}
+header h1 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--cyan);
+  letter-spacing: 0.5px;
+}
+#status-bar {
+  display: flex;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+#status {
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.status-stopped { background: var(--red); color: #fff; }
+.status-running { background: var(--green); color: #1a1b26; }
+.status-paused  { background: var(--yellow); color: #1a1b26; }
+
+/* Main layout */
+#main-layout {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+#left-panel {
+  width: 280px;
+  min-width: 220px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 8px;
+  flex-shrink: 0;
+}
+#center-panel {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#right-panel {
+  width: 340px;
+  min-width: 280px;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 8px;
+  flex-shrink: 0;
+}
+
+/* Sections */
+section {
+  margin-bottom: 8px;
+}
+section h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Controls */
+#controls h2 { margin-bottom: 6px; }
+.btn-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.ctrl-btn {
+  flex: 1;
+  padding: 6px 8px;
+  background: #2f3349;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: background 0.15s;
+}
+.ctrl-btn:hover { background: #3f4359; }
+.ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ctrl-btn:active { background: var(--hl); color: #1a1b26; }
+
+.speed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.speed-row input { flex: 1; }
+#speed-label { font-family: var(--font-mono); min-width: 50px; text-align: right; }
+
+/* Register table */
+#reg-table {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  border-collapse: collapse;
+}
+#reg-table td {
+  padding: 2px 4px;
+}
+#reg-table td:first-child {
+  color: var(--text-dim);
+  font-weight: 600;
+  width: 24px;
+}
+.reg-val {
+  text-align: right;
+  font-weight: 600;
+  color: var(--cyan);
+}
+.hl-pc {
+  color: var(--green);
+  font-weight: 700;
+}
+
+/* Flags */
+#flags {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.flag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: #2f3349;
+  color: var(--text-dim);
+  min-width: 26px;
+  text-align: center;
+}
+.flag.active {
+  background: var(--green);
+  color: #1a1b26;
+}
+
+/* Current instruction */
+.insn-display {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--orange);
+  padding: 4px 6px;
+  background: #1f2335;
+  border-radius: 4px;
+  margin-bottom: 2px;
+}
+.bytes-display {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 0 6px;
+}
+
+/* Disassembly */
+#disasm-section {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+#toolbar-asm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+#toolbar-asm input[type="text"] {
+  background: #1f2335;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  width: 80px;
+}
+#toolbar-asm label { color: var(--text-dim); cursor: pointer; }
+
+#asm-list {
+  flex: 1;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 4px;
+  background: #1f2335;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.asm-line {
+  display: flex;
+  cursor: pointer;
+  padding: 1px 2px;
+  border-radius: 2px;
+}
+.asm-line:hover { background: #2f3349; }
+.asm-addr {
+  color: var(--text-dim);
+  min-width: 60px;
+  user-select: none;
+}
+.asm-bytes {
+  color: var(--text-dim);
+  min-width: 72px;
+  font-size: 11px;
+  user-select: none;
+}
+.asm-mnemonic {
+  color: var(--hl);
+  white-space: pre;
+}
+.asm-operands {
+  color: var(--text);
+  white-space: pre;
+}
+.asm-comment {
+  color: var(--text-dim);
+  font-style: italic;
+}
+.asm-line.bp-set .asm-addr {
+  color: var(--red);
+  font-weight: 700;
+}
+.asm-line.bp-set .asm-addr::before {
+  content: "●";
+  color: var(--red);
+  margin-right: 4px;
+}
+.asm-line.current {
+  background: #2f3349;
+  outline: 1px solid var(--hl);
+}
+.asm-line.current .asm-mnemonic {
+  color: var(--green);
+  font-weight: 700;
+}
+
+/* Memory dump */
+#mem-dump {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  background: #1f2335;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.mem-line {
+  display: flex;
+}
+.mem-addr {
+  color: var(--text-dim);
+  min-width: 48px;
+}
+.mem-hex {
+  color: var(--text);
+  min-width: 180px;
+}
+.mem-ascii {
+  color: var(--text-dim);
+}
+.mem-line.watch .mem-addr {
+  color: var(--yellow);
+  font-weight: 700;
+}
+
+#toolbar-mem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+#toolbar-mem input {
+  background: #1f2335;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  width: 70px;
+}
+.small-btn {
+  background: #2f3349;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.small-btn:hover { background: #3f4359; }
+
+/* I/O panel */
+#io-panel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  background: #1f2335;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px;
+}
+.io-block {
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
+}
+.io-block:last-child { border: none; margin: 0; padding: 0; }
+.io-name {
+  color: var(--purple);
+  font-weight: 600;
+}
+.io-reg {
+  display: flex;
+  justify-content: space-between;
+  padding-left: 8px;
+}
+.io-reg-name { color: var(--text-dim); }
+.io-reg-val { color: var(--cyan); }
+
+/* Plotter section */
+#plotter-section {
+  border-top: 1px solid var(--border);
+  padding: 8px;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+#plotter-section h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+#plotter-container {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+#plotter-canvas {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #f5f0e8;
+  cursor: crosshair;
+  width: 800px;
+  height: 500px;
+}
+#plotter-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
