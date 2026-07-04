@@ -422,3 +422,25 @@ section h2 {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* Load status message */
+#load-status {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin-top: 4px;
+  text-align: center;
+}
+.load-status-ok   { color: var(--green); background: rgba(158,206,106,0.1); }
+.load-status-error{ color: var(--red);   background: rgba(247,118,142,0.1); }
+.load-status-info { color: var(--cyan);  background: rgba(125,207,255,0.1); }
+
+/* Plotter info */
+#plotter-color {
+  font-weight: bold;
+  font-family: var(--font-mono);
+}
+#plotter-info span {
+  margin-right: 12px;
+}

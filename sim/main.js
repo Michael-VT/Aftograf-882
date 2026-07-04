@@ -8,6 +8,32 @@ import { CPU8080 } from './cpu8080.js';
 import { MMU } from './memory.js';
 
 /* ═══════════════════════════════════════════════════════════════
+ * Plotter State Watch Addresses
+ *
+ * Симулятор читает эти адреса из RAM (через MMU) чтобы отслеживать
+ * состояние пера. Можно менять по мере анализа прошивки.
+ * ═══════════════════════════════════════════════════════════════ */
+
+const PLOTTER_CFG = {
+  X_POS_LO: 0x6180,   // координата X, младший байт (SHLD target)
+  X_POS_HI: 0x6181,   // координата X, старший байт
+  Y_POS_LO: 0x61ca,   // координата Y, младший байт (LHLD source)
+  Y_POS_HI: 0x61cb,   // координата Y, старший байт
+  PEN_STATE: 0x63f0,  // bit 0 = перо вниз (1) / вверх (0)
+  PEN_COLOR: 0x61e8,  // номер пера/цвета (0-6)
+};
+
+const PEN_COLORS = [
+  { name: 'Чёрный',   stroke: '#000000' },
+  { name: 'Красный',  stroke: '#cc0000' },
+  { name: 'Синий',    stroke: '#0055ff' },
+  { name: 'Зелёный',  stroke: '#009900' },
+  { name: 'Жёлтый',   stroke: '#ccaa00' },
+  { name: 'Фиолетовый',stroke: '#8800cc' },
+  { name: 'Голубой',  stroke: '#0099cc' },
+];
+
+/* ═══════════════════════════════════════════════════════════════
  * I/O Device Stubs
  * ═══════════════════════════════════════════════════════════════ */
 
@@ -238,49 +264,89 @@ class USART8251 {
  * PPI2 port B → auxiliary
  */
 class Plotter {
-  constructor() {
-    this.x = 0;
-    this.y = 0;
+  constructor(mmu) {
+    this.mmu = mmu;
+    this.x = 0; this.y = 0;
     this.penDown = false;
     this.penNum = 0;
-    this.penSpeed = 0;
     this.lastXPhase = 0;
     this.lastYPhase = 0;
-    this.xPos = 0; // accumulated position
+    this.xPos = 0;
     this.yPos = 0;
-
-    // Drawing surface: we record lines for canvas rendering
-    this.lines = []; // [{x1,y1,x2,y2,pen}]
+    this.lines = [];
     this.currentSegment = null;
+    this.lastMemPenState = -1;
+    this.lastMemX = -1;
+    this.lastMemY = -1;
+    this.lastMemColor = -1;
   }
 
-  /** Called when PPI1 port A (X stepper) or port B (Y stepper) is written. */
+  /** Читает состояние из RAM по адресам PLOTTER_CFG. */
+  syncFromMemory() {
+    const xLo = this.mmu.peek(PLOTTER_CFG.X_POS_LO);
+    const xHi = this.mmu.peek(PLOTTER_CFG.X_POS_HI);
+    const yLo = this.mmu.peek(PLOTTER_CFG.Y_POS_LO);
+    const yHi = this.mmu.peek(PLOTTER_CFG.Y_POS_HI);
+    const pState = this.mmu.peek(PLOTTER_CFG.PEN_STATE);
+    const pColor = this.mmu.peek(PLOTTER_CFG.PEN_COLOR);
+
+    const memX = (xHi << 8) | xLo;
+    const memY = (yHi << 8) | yLo;
+    const memPenDown = !!(pState & 0x01);
+    const memColor = pColor & 0x07;
+
+    // Координаты из RAM имеют приоритет
+    if (memX !== this.lastMemX) {
+      this.xPos = memX; this.x = memX;
+      this.lastMemX = memX;
+    }
+    if (memY !== this.lastMemY) {
+      this.yPos = memY; this.y = memY;
+      this.lastMemY = memY;
+    }
+
+    // Состояние пера
+    if (memPenDown !== this.lastMemPenState) {
+      const wasDown = this.penDown;
+      this.penDown = memPenDown;
+      this.lastMemPenState = memPenDown;
+
+      if (this.penDown && !wasDown) {
+        this.currentSegment = { x1: this.xPos, y1: this.yPos, pen: this.penNum };
+      } else if (!this.penDown && wasDown && this.currentSegment) {
+        this.currentSegment.x2 = this.xPos;
+        this.currentSegment.y2 = this.yPos;
+        this.lines.push(this.currentSegment);
+        this.currentSegment = null;
+      }
+    }
+
+    // Номер пера / цвет
+    if (memColor !== this.lastMemColor) {
+      this.penNum = Math.min(memColor, 6);
+      this.lastMemColor = memColor;
+    }
+  }
+
+  /** Приращение от шагового двигателя (PPI write). */
   updateStepper(axis, phases) {
     const phase = phases & 0x0f;
     if (axis === 'x') {
       if (this.lastXPhase !== phase && this.lastXPhase !== 0) {
-        // Detect direction by phase sequence
-        const dir = this._stepDir(this.lastXPhase, phase);
-        this.xPos += dir;
+        this.xPos += this._stepDir(this.lastXPhase, phase);
         this.x = this.xPos;
       }
       this.lastXPhase = phase;
     } else {
       if (this.lastYPhase !== phase && this.lastYPhase !== 0) {
-        const dir = this._stepDir(this.lastYPhase, phase);
-        this.yPos += dir;
+        this.yPos += this._stepDir(this.lastYPhase, phase);
         this.y = this.yPos;
       }
       this.lastYPhase = phase;
     }
   }
 
-  /** Heuristic direction from 4-phase stepper transitions. */
   _stepDir(prev, curr) {
-    // Common 4-phase sequences:
-    // CW:  1→3→2→6→4→C→8→9 (or 1-3-2-6)
-    // CCW: reverse
-    // We use a simple ring: 0x1,0x3,0x2,0x6,0x4,0xc,0x8,0x9
     const ring = [0x1, 0x3, 0x2, 0x6, 0x4, 0xc, 0x8, 0x9];
     const pi = ring.indexOf(prev);
     const ci = ring.indexOf(curr);
@@ -289,31 +355,29 @@ class Plotter {
     return (diff === 1 || diff === 2) ? 1 : -1;
   }
 
-  /** Pen control (PPI2 port A bits). */
+  /** Состояние пера из PPI (запасной источник, пока RAM не пишет). */
   setPen(ctl) {
-    const wasDown = this.penDown;
-    this.penDown = !(ctl & 0x01); // bit 0: 0=down, 1=up
-    this.penNum = (ctl >> 1) & 0x07; // bits 1-3: pen number
-    this.penSpeed = (ctl >> 4) & 0x0f; // bits 4-7: speed/acceleration
+    if (this.lastMemPenState < 0) {
+      const wasDown = this.penDown;
+      this.penDown = !(ctl & 0x01);
+      const pn = (ctl >> 1) & 0x07;
+      if (pn < 7) this.penNum = pn;
 
-    if (this.penDown && !wasDown) {
-      // Pen down — start a new segment
-      this.currentSegment = { x1: this.xPos, y1: this.yPos, pen: this.penNum };
-    } else if (!this.penDown && wasDown && this.currentSegment) {
-      // Pen up — finish segment
-      this.currentSegment.x2 = this.xPos;
-      this.currentSegment.y2 = this.yPos;
-      this.lines.push(this.currentSegment);
-      this.currentSegment = null;
+      if (this.penDown && !wasDown) {
+        this.currentSegment = { x1: this.xPos, y1: this.yPos, pen: this.penNum };
+      } else if (!this.penDown && wasDown && this.currentSegment) {
+        this.currentSegment.x2 = this.xPos;
+        this.currentSegment.y2 = this.yPos;
+        this.lines.push(this.currentSegment);
+        this.currentSegment = null;
+      }
     }
   }
 
-  /** Called when position changes with pen down — extend current segment. */
   updatePosition() {
     if (this.penDown && !this.currentSegment) {
       this.currentSegment = { x1: this.xPos, y1: this.yPos, pen: this.penNum };
     }
-    // Segment endpoint auto-updates on next pen-up
   }
 
   reset() {
@@ -322,6 +386,9 @@ class Plotter {
     this.penDown = false;
     this.penNum = 0;
     this.lastXPhase = 0; this.lastYPhase = 0;
+    this.lastMemPenState = -1;
+    this.lastMemX = -1; this.lastMemY = -1;
+    this.lastMemColor = -1;
     this.lines = [];
     this.currentSegment = null;
   }
@@ -498,7 +565,7 @@ class App {
     );
 
     // Plotter
-    this.plotter = new Plotter();
+    this.plotter = new Plotter(this.mmu);
 
     // State
     this.running = false;
@@ -558,6 +625,8 @@ class App {
       plotterPos: this.$('plotter-pos'),
       plotterPen: this.$('plotter-pen'),
       plotterPenNum: this.$('plotter-pen-num'),
+      loadStatus: this.$('load-status'),
+      plotterColor: this.$('plotter-color'),
     };
   }
 
@@ -618,30 +687,47 @@ class App {
     }
     this.els.cycleCount.textContent = `${this.cpu.cycles} T-states`;
     this.els.ipDisplay.textContent = `PC: ${this.cpu.pc.toString(16).padStart(4,'0').toUpperCase()}`;
-  }
-
-  /** Load ROM binaries from file input. */
+  /** Load ROM from file input.
+   *  Поддерживает:
+   *  - Один файл 24KB (firmware.bin) — все 3 чипа сразу
+   *  - Один файл 8KB — загружается как Chip 1
+   *  - Три файла 8KB — загружаются по порядку
+   */
   async _handleROMFiles(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
-    // Sort by name to get chips in order
-    const sorted = Array.from(files).sort((a, b) => a.name.localeCompare(b.name));
     const buffers = [];
-
-    for (const file of sorted) {
+    for (const file of files) {
       const buf = await file.arrayBuffer();
       buffers.push(new Uint8Array(buf));
     }
 
-    // Determine offsets — if 3 files, assume they're the 3 EPROMs
+    const totalBytes = buffers.reduce((s, b) => s + b.length, 0);
+
+    // Создаём новый MMU
     this.mmu = new MMU(this.ppi1, this.ppi2, this.pit, this.uart);
-    for (let i = 0; i < Math.min(buffers.length, 3); i++) {
-      this.mmu.loadROM(buffers[i], i * 0x2000);
+
+    if (buffers.length === 1 && buffers[0].length === 0x6000) {
+      // Один файл 24KB — firmware.bin
+      this.mmu.loadROM(buffers[0], 0x0000);
+      this._setLoadStatus(`Загружена прошивка 24KB (3 чипа)`, 'ok');
+    } else if (buffers.length === 1 && buffers[0].length === 0x2000) {
+      // Один чип 8KB
+      this.mmu.loadROM(buffers[0], 0x0000);
+      this._setLoadStatus(`Загружен Chip 1 (8KB)`, 'ok');
+    } else {
+      // Несколько файлов — по порядку
+      const sorted = Array.from(buffers).sort((a, b) => a.length - b.length);
+      for (let i = 0; i < Math.min(sorted.length, 3); i++) {
+        this.mmu.loadROM(sorted[i], i * 0x2000);
+      }
+      this._setLoadStatus(`Загружено ${Math.min(sorted.length, 3)} чипа(ов)`, 'ok');
     }
+
     this.romLoaded = true;
 
-    // Recreate CPU with fresh MMU
+    // Пересоздаём CPU с новым MMU
     this.cpu = new CPU8080(
       (addr) => this.mmu.readByte(addr),
       (addr, val) => this.mmu.writeByte(addr, val)
@@ -654,6 +740,19 @@ class App {
     this._updateMemoryDump(0x6000);
     this._updateIO();
     this._updatePlotterUI();
+    this.els.btnStep.disabled = false;
+  }
+
+  _setLoadStatus(msg, type) {
+    const el = this.els.loadStatus;
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'load-status-' + (type || 'info');
+    el.style.display = 'block';
+    if (type === 'ok') {
+      setTimeout(() => { el.style.display = 'none'; }, 5000);
+    }
+  }
     this.els.btnStep.disabled = false;
   }
 
@@ -762,12 +861,13 @@ class App {
   }
 
   /** Sync plotter state from I/O registers after execution. */
+  /** Sync plotter state from RAM addresses (PLOTTER_CFG) + PPI writes. */
   _syncPlotter() {
-    // X stepper via PPI1 port A
+    // Читаем координаты/перо из RAM (основной источник)
+    this.plotter.syncFromMemory();
+    // PPI writes — запасной источник для шаговых двигателей
     this.plotter.updateStepper('x', this.ppi1.portA);
-    // Y stepper via PPI1 port B
     this.plotter.updateStepper('y', this.ppi1.portB);
-    // Pen control via PPI2 port A
     this.plotter.setPen(this.ppi2.portA);
     this.plotter.updatePosition();
   }
@@ -973,6 +1073,9 @@ class App {
     this.els.plotterPos.textContent = `X: ${this.plotter.xPos} Y: ${this.plotter.yPos}`;
     this.els.plotterPen.textContent = `Перо: ${this.plotter.penDown ? 'Вниз' : 'Вверх'}`;
     this.els.plotterPenNum.textContent = `Перо #${this.plotter.penNum + 1}`;
+    const c = PEN_COLORS[this.plotter.penNum] || PEN_COLORS[0];
+    this.els.plotterColor.textContent = `${c.name}`;
+    this.els.plotterColor.style.color = c.stroke;
   }
 
   /** Draw accumulated plotter lines onto canvas. */
@@ -1021,13 +1124,13 @@ class App {
     }
 
     // Draw lines
-    const penColors = ['#7dcfff', '#f7768e', '#e0af68', '#9ece6a', '#bb9af7', '#73daca'];
     ctx.lineWidth = 2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
     for (const seg of this.plotter.lines) {
-      ctx.strokeStyle = penColors[seg.pen % penColors.length];
+      const c = PEN_COLORS[seg.pen] || PEN_COLORS[0];
+      ctx.strokeStyle = c.stroke;
       ctx.beginPath();
       ctx.moveTo(sx(seg.x1), sy(seg.y1));
       ctx.lineTo(sx(seg.x2), sy(seg.y2));
@@ -1056,21 +1159,49 @@ const app = new App();
 
 // Auto-load ROMs from server if served
 async function tryAutoLoadROMs() {
+  // Шаг 1: пробуем единый firmware.bin
+  try {
+    const resp = await fetch('./firmware.bin');
+    if (resp.ok) {
+      const buf = await resp.arrayBuffer();
+      const data = new Uint8Array(buf);
+      app.mmu = new MMU(app.ppi1, app.ppi2, app.pit, app.uart);
+      app.mmu.loadROM(data, 0x0000);
+      app.romLoaded = true;
+      app.cpu = new CPU8080(
+        (addr) => app.mmu.readByte(addr),
+        (addr, val) => app.mmu.writeByte(addr, val)
+      );
+      app.plotter.reset();
+      app._resetState();
+      app._rebuildDisasm(0);
+      app._updateMemoryDump(0x6000);
+      app._updateIO();
+      app._updatePlotterUI();
+      app.els.btnStep.disabled = false;
+      app._setLoadStatus('ROM автозагружена (firmware.bin)', 'ok');
+      return;
+    }
+  } catch (_) { /* fall through */ }
+
+  // Шаг 2: пробуем три отдельных чипа (старый формат)
   const candidates = [
-    '../Autograf-882-CPU_Board-On_Top-Small-Chip01-FromLeft-D2764A-NearOfHeatsink.bin',
-    '../Autograf-882-CPU_Board-On_Top-Small-Chip02-FromLeft-D2764A-InMiddle.bin',
-    '../Autograf-882-CPU_Board-On_Top-Small-Chip03-FromLeft-D2764A-FarOfHeatsink.bin',
+    'Autograf-882-CPU_Board-On_Top-Small-Chip01-FromLeft-D2764A-NearOfHeatsink.bin',
+    'Autograf-882-CPU_Board-On_Top-Small-Chip02-FromLeft-D2764A-InMiddle.bin',
+    'Autograf-882-CPU_Board-On_Top-Small-Chip03-FromLeft-D2764A-FarOfHeatsink.bin',
   ];
+  // URL encode spaces
+  const encode = (s) => s.replace(/ /g, '%20');
 
   const buffers = [];
   for (const path of candidates) {
     try {
-      const resp = await fetch(path);
+      const resp = await fetch(encode(path));
       if (resp.ok) {
         const buf = await resp.arrayBuffer();
         buffers.push(new Uint8Array(buf));
       }
-    } catch (_) { /* ignore */ }
+    } catch (_) { /* skip */ }
   }
 
   if (buffers.length > 0) {
@@ -1090,7 +1221,7 @@ async function tryAutoLoadROMs() {
     app._updateIO();
     app._updatePlotterUI();
     app.els.btnStep.disabled = false;
-    console.log(`ROMs autoloaded: ${buffers.length} chip(s) loaded`);
+    app._setLoadStatus(`ROM автозагружены: ${buffers.length} чипа`, 'ok');
   }
 }
 
