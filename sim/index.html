@@ -4,11 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Autograf-882 — Debug Simulator</title>
-<link rel="stylesheet" href="styles.css?v=20260707">
+<link rel="stylesheet" href="styles.css?v=20260708">
 </head>
 <body>
 <div id="app">
-  <!-- Header: всё управление в одной строке -->
+  <!-- Header: управление в две строки -->
   <header>
     <div id="header-main">
       <h1>Автограф-882 отладчик</h1>
@@ -31,66 +31,69 @@
         <input type="range" id="speed-slider" min="0" max="5" step="1" value="2">
         <span id="speed-label">1 KHz</span>
       </div>
-      <button id="btn-load-rom" class="ctrl-btn">📂 Загрузить прошивку</button>
+      <button id="btn-load-rom" class="ctrl-btn">📂</button>
       <input type="file" id="rom-file-input" accept=".bin" multiple style="display:none">
       <div id="load-status" class="load-status-info" style="display:none">—</div>
     </div>
   </header>
 
   <div id="main-layout">
-    <!-- LEFT: debug panels -->
+    <!-- LEFT COLUMN: debug panels (narrow) -->
     <div id="left-region">
-      <div id="debug-top" class="debug-row">
-        <div id="regs-stack-io" class="debug-col">
-          <section id="registers">
-            <h2>CPU</h2>
-            <table id="reg-table">
-              <tr><td>A</td><td id="reg-a" class="reg-val">00</td><td>F</td><td id="reg-f" class="reg-val">00</td></tr>
-              <tr><td>B</td><td id="reg-b" class="reg-val">00</td><td>C</td><td id="reg-c" class="reg-val">00</td></tr>
-              <tr><td>D</td><td id="reg-d" class="reg-val">00</td><td>E</td><td id="reg-e" class="reg-val">00</td></tr>
-              <tr><td>H</td><td id="reg-h" class="reg-val">00</td><td>L</td><td id="reg-l" class="reg-val">00</td></tr>
-              <tr><td>SP</td><td id="reg-sp" class="reg-val" colspan="3">0000</td></tr>
-              <tr><td>PC</td><td id="reg-pc" class="reg-val hl-pc" colspan="3">0000</td></tr>
-            </table>
-            <div id="flags">
-              <span class="flag" id="flag-s">S</span>
-              <span class="flag" id="flag-z">Z</span>
-              <span class="flag" id="flag-ac">AC</span>
-              <span class="flag" id="flag-p">P</span>
-              <span class="flag" id="flag-cy">CY</span>
-            </div>
-          </section>
-
-          <section id="stack-section">
-            <h2>Стек</h2>
-            <div id="stack-display" style="font-size:10px;font-family:var(--font-mono);color:var(--text-dim)">—</div>
-          </section>
-
-          <section id="pointers-section">
-            <h2>Указатели</h2>
-            <div id="pointers-display" style="font-size:10px;font-family:var(--font-mono);color:var(--text-dim)">—</div>
-          </section>
-
-          <section id="io-section">
-            <h2>I/O</h2>
-            <div id="io-panel" style="font-size:10px"></div>
-          </section>
+      <section id="registers">
+        <h2>CPU</h2>
+        <table id="reg-table">
+          <tr><td>A</td><td id="reg-a" class="reg-val">00</td><td>F</td><td id="reg-f" class="reg-val">00</td></tr>
+          <tr><td>B</td><td id="reg-b" class="reg-val">00</td><td>C</td><td id="reg-c" class="reg-val">00</td></tr>
+          <tr><td>D</td><td id="reg-d" class="reg-val">00</td><td>E</td><td id="reg-e" class="reg-val">00</td></tr>
+          <tr><td>H</td><td id="reg-h" class="reg-val">00</td><td>L</td><td id="reg-l" class="reg-val">00</td></tr>
+          <tr><td>SP</td><td id="reg-sp" class="reg-val" colspan="3">0000</td></tr>
+          <tr><td>PC</td><td id="reg-pc" class="reg-val hl-pc" colspan="3">0000</td></tr>
+        </table>
+        <div id="flags">
+          <span class="flag" id="flag-s">S</span>
+          <span class="flag" id="flag-z">Z</span>
+          <span class="flag" id="flag-ac">AC</span>
+          <span class="flag" id="flag-p">P</span>
+          <span class="flag" id="flag-cy">CY</span>
         </div>
+      </section>
 
-        <div id="disasm-col" class="debug-col">
-          <section id="disasm-section">
-            <h2>Дизассемблер</h2>
-            <div id="toolbar-asm">
-              <label for="asm-search">🔍</label>
-              <input type="text" id="asm-search" placeholder="Адрес">
-              <label><input type="checkbox" id="asm-follow-pc" checked> Следить</label>
-            </div>
-            <div id="asm-list"></div>
-          </section>
+      <section id="last-instruction">
+        <h2>Сейчас</h2>
+        <div id="current-insn" class="insn-display">—</div>
+        <div id="current-bytes" class="bytes-display"></div>
+      </section>
+
+      <section id="stack-section">
+        <h2>Стек</h2>
+        <div id="stack-display" style="font-size:10px;font-family:var(--font-mono);color:var(--text-dim)">—</div>
+      </section>
+
+      <section id="pointers-section">
+        <h2>Указатели</h2>
+        <div id="pointers-display" style="font-size:10px;font-family:var(--font-mono);color:var(--text-dim)">—</div>
+      </section>
+
+      <section id="io-section">
+        <h2>I/O</h2>
+        <div id="io-panel" style="font-size:10px"></div>
+      </section>
+    </div>
+
+    <!-- CENTER COLUMN: disasm (top) + memory (bottom) -->
+    <div id="center-region">
+      <section id="disasm-section">
+        <h2>Дизассемблер</h2>
+        <div id="toolbar-asm">
+          <label for="asm-search">🔍</label>
+          <input type="text" id="asm-search" placeholder="Адрес">
+          <label><input type="checkbox" id="asm-follow-pc" checked> Следить</label>
         </div>
-      </div>
+        <div id="asm-list"></div>
+      </section>
 
-      <div id="memory-section">
+      <section id="memory-section">
         <h2>Память</h2>
         <div id="toolbar-mem">
           <label for="mem-addr">Адрес:</label>
@@ -98,26 +101,24 @@
           <button id="mem-refresh" class="small-btn">⟳</button>
         </div>
         <div id="mem-dump"></div>
-      </div>
+      </section>
     </div>
 
-    <!-- RIGHT: plotter 2x wider -->
+    <!-- RIGHT: plotter 1.5x wider, A4 portrait -->
     <div id="right-region">
       <section id="plotter-section">
         <h2>Плоттер</h2>
-        <div id="plotter-container">
-          <canvas id="plotter-canvas" width="700" height="700"></canvas>
-          <div id="plotter-info">
-            <span id="plotter-pos">X:0 Y:0</span>
-            <span id="plotter-pen">↑</span>
-            <span id="plotter-pen-num">#1</span>
-            <span id="plotter-color">—</span>
-          </div>
+        <canvas id="plotter-canvas" width="600" height="848"></canvas>
+        <div id="plotter-info">
+          <span id="plotter-pos">X:0 Y:0</span>
+          <span id="plotter-pen">↑</span>
+          <span id="plotter-pen-num">#1</span>
+          <span id="plotter-color">—</span>
         </div>
       </section>
     </div>
   </div>
 </div>
-<script src="bundle.js?v=20260707"></script>
+<script src="bundle.js?v=20260708"></script>
 </body>
 </html>

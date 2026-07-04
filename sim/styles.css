@@ -33,53 +33,31 @@ body {
   height: 100vh;
 }
 
-/* Main layout — отладка слева, плоттер 2x справа */
+/* Main layout — 3 колонки: отладка | дизассемблер+память | плоттер A4 */
 #main-layout {
   display: flex;
   flex: 1;
   overflow: hidden;
 }
 
-/* Левая область */
 #left-region {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: 4px 6px;
-  min-width: 0;
-}
-
-/* Правая область — плоттер шире */
-#right-region {
-  width: 500px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
-  padding: 4px 6px;
-}
-
-.debug-row {
-  display: flex;
-  gap: 6px;
-  flex: 1;
-  min-height: 0;
-}
-
-.debug-col {
-  display: flex;
-  flex-direction: column;
-}
-
-#regs-stack-io {
   width: 180px;
   flex-shrink: 0;
+  overflow-y: auto;
+  padding: 4px 6px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
   gap: 4px;
 }
 
-#disasm-col {
+#center-region {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  padding: 4px 6px;
+  overflow: hidden;
 }
 
 #disasm-section {
@@ -92,10 +70,21 @@ body {
 #asm-list {
   flex: 1;
   overflow-y: auto;
-  min-height: 80px;
+  min-height: 60px;
 }
 
-/* Header */
+#memory-section {
+  flex-shrink: 0;
+}
+
+#right-region {
+  width: 400px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 4px 6px;
+}
+
 header {
   padding: 4px 12px;
   background: var(--panel-bg);
