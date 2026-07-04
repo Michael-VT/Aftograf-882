@@ -631,7 +631,10 @@ class App {
       this.els.speedLabel.textContent = speeds[idx];
     });
     this.els.btnLoadRom.addEventListener('click', () => this.els.romFileInput.click());
-    this.els.btnSettings.addEventListener('click', () => this._openSettings());
+    this.els.btnSettings.addEventListener('click', () => {
+      console.log('[AFTOGRAF] Settings button clicked');
+      this._openSettings();
+    });
     this.els.romFileInput.addEventListener('change', (e) => this._handleROMFiles(e));
     this.els.asmSearch.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -750,15 +753,26 @@ class App {
    * ═══════════════════════════════════ */
 
   _openSettings() {
-    // Уже открыта?
-    if (document.getElementById('settings-overlay')) return;
-
-    // Вставляем HTML панели
-    const div = document.createElement('div');
-    div.innerHTML = this.settings.renderPanel();
-    document.body.appendChild(div.firstElementChild);
-
-    this._bindSettingsEvents();
+    try {
+      console.log('[AFTOGRAF] Opening settings panel...');
+      if (document.getElementById('settings-overlay')) {
+        console.log('[AFTOGRAF] Settings already open');
+        return;
+      }
+      const div = document.createElement('div');
+      div.innerHTML = this.settings.renderPanel();
+      const panel = div.firstElementChild;
+      if (!panel) {
+        console.error('[AFTOGRAF] renderPanel returned empty');
+        return;
+      }
+      document.body.appendChild(panel);
+      console.log('[AFTOGRAF] Settings panel appended to DOM');
+      this._bindSettingsEvents();
+      console.log('[AFTOGRAF] Settings events bound');
+    } catch (err) {
+      console.error('[AFTOGRAF] _openSettings error:', err);
+    }
   }
 
   _closeSettings() {
@@ -1326,16 +1340,37 @@ class App {
  * Startup
  * ═══════════════════════════════════════════════════════════════ */
 
+// Глобальный обработчик ошибок — в консоль + на страницу
+window.addEventListener('error', (e) => {
+  console.error('[AFTOGRAF] Uncaught:', e.error || e.message);
+  const statusEl = document.getElementById('load-status');
+  if (statusEl) {
+    statusEl.textContent = '⛔ JS Error: ' + (e.error?.message || e.message);
+    statusEl.style.display = 'block';
+    statusEl.className = 'load-status-error';
+  }
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[AFTOGRAF] Unhandled Promise:', e.reason);
+});
+
+console.log('[AFTOGRAF] Starting App...');
 const app = new App();
+console.log('[AFTOGRAF] App initialized');
 
 // Auto-load ROMs from server if served
 async function tryAutoLoadROMs() {
+  console.log('[AFTOGRAF] Auto-load: trying firmware.bin...');
+
   // Шаг 1: пробуем единый firmware.bin
   try {
-    const resp = await fetch('./firmware.bin');
+    const resp = await fetch('./firmware.bin?_=' + Date.now());
+    console.log('[AFTOGRAF] firmware.bin fetch:', resp.status, resp.statusText);
     if (resp.ok) {
       const buf = await resp.arrayBuffer();
       const data = new Uint8Array(buf);
+      console.log('[AFTOGRAF] firmware.bin loaded:', data.length, 'bytes');
       app.mmu = new MMU(app.ppi1, app.ppi2, app.pit, app.uart);
       app.mmu.loadROM(data, 0x0000);
       app.romLoaded = true;
@@ -1350,32 +1385,42 @@ async function tryAutoLoadROMs() {
       app._updateIO();
       app._updatePlotterUI();
       app.els.btnStep.disabled = false;
-      app._setLoadStatus('ROM автозагружена (firmware.bin)', 'ok');
+      app._setLoadStatus('✓ ROM автозагружена (firmware.bin, ' + (data.length/1024).toFixed(0) + 'KB)', 'ok');
+      console.log('[AFTOGRAF] Auto-load SUCCESS');
       return;
+    } else {
+      console.warn('[AFTOGRAF] firmware.bin fetch failed:', resp.status);
     }
-  } catch (_) { /* fall through */ }
+  } catch (err) {
+    console.error('[AFTOGRAF] firmware.bin error:', err);
+  }
 
+  console.log('[AFTOGRAF] Auto-load: trying individual chip files...');
   // Шаг 2: пробуем три отдельных чипа (старый формат)
   const candidates = [
     'Autograf-882-CPU_Board-On_Top-Small-Chip01-FromLeft-D2764A-NearOfHeatsink.bin',
     'Autograf-882-CPU_Board-On_Top-Small-Chip02-FromLeft-D2764A-InMiddle.bin',
     'Autograf-882-CPU_Board-On_Top-Small-Chip03-FromLeft-D2764A-FarOfHeatsink.bin',
   ];
-  // URL encode spaces
   const encode = (s) => s.replace(/ /g, '%20');
 
   const buffers = [];
   for (const path of candidates) {
     try {
-      const resp = await fetch(encode(path));
+      const url = encode(path) + '?_=' + Date.now();
+      const resp = await fetch(url);
+      console.log('[AFTOGRAF] Fetch', path.slice(0, 40) + '...', resp.status);
       if (resp.ok) {
         const buf = await resp.arrayBuffer();
         buffers.push(new Uint8Array(buf));
       }
-    } catch (_) { /* skip */ }
+    } catch (err) {
+      console.warn('[AFTOGRAF] Fetch error:', path.slice(0, 40), err.message);
+    }
   }
 
   if (buffers.length > 0) {
+    console.log('[AFTOGRAF] Loaded', buffers.length, 'chip(s)');
     app.mmu = new MMU(app.ppi1, app.ppi2, app.pit, app.uart);
     for (let i = 0; i < Math.min(buffers.length, 3); i++) {
       app.mmu.loadROM(buffers[i], i * 0x2000);
@@ -1392,7 +1437,10 @@ async function tryAutoLoadROMs() {
     app._updateIO();
     app._updatePlotterUI();
     app.els.btnStep.disabled = false;
-    app._setLoadStatus(`ROM автозагружены: ${buffers.length} чипа`, 'ok');
+    app._setLoadStatus('✓ ROM автозагружены: ' + buffers.length + ' чипа', 'ok');
+  } else {
+    console.warn('[AFTOGRAF] Auto-load FAILED: no ROM files found');
+    app._setLoadStatus('⚠ ROM не найдены. Нажмите ⚙ Настройки → Загрузить', 'error');
   }
 }
 
