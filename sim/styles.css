@@ -249,54 +249,65 @@ section h2 {
 .asm-line {
   display: flex;
   cursor: pointer;
-  padding: 1px 2px;
+  padding: 1px 0;
   border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: nowrap;
 }
 .asm-line:hover { background: #2f3349; }
+
+.asm-bp {
+  width: 20px; flex-shrink: 0;
+  text-align: center;
+  color: var(--red);
+}
 .asm-addr {
+  width: 46px; flex-shrink: 0;
   color: var(--text-dim);
-  min-width: 60px;
   user-select: none;
 }
 .asm-bytes {
+  width: 76px; flex-shrink: 0;
   color: var(--text-dim);
-  min-width: 72px;
   font-size: 11px;
   user-select: none;
 }
 .asm-mnemonic {
+  width: 50px; flex-shrink: 0;
   color: var(--green);
-  min-width: 48px;
-  display: inline-block;
 }
 .asm-operands {
+  min-width: 60px;
   color: var(--text);
 }
-.asm-comment {
+.asm-annot {
+  flex: 1;
   color: var(--text-dim);
   font-style: italic;
+  font-size: 11px;
+  margin-left: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.asm-line.bp-set .asm-addr {
-  color: var(--red);
-  font-weight: 700;
-}
-.asm-line.bp-set .asm-addr::before {
-  content: "●";
-  color: var(--red);
-  margin-right: 4px;
-}
+
 .asm-line.current {
-  background: rgba(125,207,255,0.12);
+  background: rgba(125,207,255,0.15);
   border-left: 3px solid var(--cyan);
 }
-.asm-line.current .asm-addr {
-  color: var(--cyan);
-}
-.asm-line.current .asm-bytes {
+.asm-line.current .asm-addr,
+.asm-line.current .asm-bytes,
+.asm-line.current .asm-mnemonic,
+.asm-line.current .asm-operands {
   color: var(--cyan);
 }
 .asm-line.current .asm-mnemonic {
-  color: var(--cyan);
+  font-weight: 700;
+}
+
+.asm-line.bp-set .asm-bp {
+  color: var(--red);
   font-weight: 700;
 }
 

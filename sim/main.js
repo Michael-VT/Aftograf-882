@@ -988,7 +988,7 @@ class App {
 
     this._updateAll();
     if (this.els.asmFollowPc.checked) {
-      this._ensureVisible(pcBefore);
+      this._ensureVisible(this.cpu.pc);
     }
   }
 
@@ -1159,15 +1159,40 @@ class App {
       if (this.breakpoints.has(insn.addr)) line.classList.add('bp-set');
       if (insn.addr === pc) line.classList.add('current');
 
+      const bp = this.breakpoints.has(insn.addr) ? '●' : ' ';
+      const mnem = insn.mnemonic.split(' ')[0];
+      const oper = insn.mnemonic.includes(' ') ? insn.mnemonic.slice(insn.mnemonic.indexOf(' ')+1) : '';
+
+      // Аннотация: адрес перехода для JMP/CALL
+      let annot = '';
+      if (['JMP','CALL','JNZ','JZ','JNC','JC','JPO','JPE','JP','JM','CNZ','CZ','CNC','CC','CPO','CPE','CP','CM'].includes(mnem)) {
+        const addr = parseInt(oper.replace(/^0x/i,''), 16);
+        if (!isNaN(addr)) {
+          const b = this.mmu.peek(addr);
+          annot = `; → $${oper} ($${b.toString(16).padStart(2,'0').toUpperCase()})`;
+        }
+      } else if (['LDA','STA','LHLD','SHLD'].includes(mnem)) {
+        const addr = parseInt(oper.replace(/^0x/i,''), 16);
+        if (!isNaN(addr)) {
+          const val = this.mmu.peek(addr);
+          annot = `; [$${addr.toString(16).padStart(4,'0').toUpperCase()}]=$${val.toString(16).padStart(2,'0').toUpperCase()}`;
+        }
+      } else if (['OUT','IN'].includes(mnem)) {
+        const port = parseInt(oper, 16);
+        const name = PORT_NAMES[0xe000 | port] || '';
+        if (name) annot = `; ${name}`;
+      }
+
       line.innerHTML = `
+        <span class="asm-bp">${bp}</span>
         <span class="asm-addr">${insn.addr.toString(16).padStart(4,'0').toUpperCase()}</span>
         <span class="asm-bytes">${this._formatRawBytes(insn)}</span>
-        <span class="asm-mnemonic">${insn.mnemonic.split(' ')[0]}</span>
-        <span class="asm-operands">${insn.mnemonic.includes(' ') ? insn.mnemonic.slice(insn.mnemonic.indexOf(' ')+1) : ''}</span>
+        <span class="asm-mnemonic">${mnem}</span>
+        <span class="asm-operands">${oper}</span>
+        <span class="asm-annot">${annot}</span>
       `;
 
       line.addEventListener('click', () => {
-        // Toggle breakpoint
         if (this.breakpoints.has(insn.addr)) {
           this.breakpoints.delete(insn.addr);
         } else {
