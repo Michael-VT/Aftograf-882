@@ -33,80 +33,53 @@ body {
   height: 100vh;
 }
 
-/* Header */
-header {
-  padding: 8px 16px;
-  background: var(--panel-bg);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  flex-shrink: 0;
-}
-header h1 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--cyan);
-  letter-spacing: 0.5px;
-}
-#status-bar {
-  display: flex;
-  gap: 16px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
-#status {
-  padding: 2px 8px;
-  border-radius: 3px;
-  font-weight: 600;
-}
-.status-stopped { background: var(--red); color: #fff; }
-.status-running { background: var(--green); color: #1a1b26; }
-.status-paused  { background: var(--yellow); color: #1a1b26; }
-
-/* Main layout — 2 колонки: отладка слева, плоттер A4 справа */
+/* Main layout — отладка слева, плоттер 2x справа */
 #main-layout {
   display: flex;
   flex: 1;
   overflow: hidden;
 }
 
-/* Левая область — все панели отладки */
+/* Левая область */
 #left-region {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 6px 8px;
+  padding: 4px 6px;
   min-width: 0;
 }
 
-.layout-row {
+/* Правая область — плоттер шире */
+#right-region {
+  width: 500px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 4px 6px;
+}
+
+.debug-row {
   display: flex;
-  gap: 8px;
-  margin-bottom: 6px;
-  flex-shrink: 0;
-}
-
-.col-fixed {
-  width: 260px;
-  flex-shrink: 0;
-}
-
-.col-grow {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Строка отладки: управление + дизассемблер */
-#row-debug {
+  gap: 6px;
   flex: 1;
   min-height: 0;
 }
 
-#row-debug .col-grow {
+.debug-col {
   display: flex;
   flex-direction: column;
+}
+
+#regs-stack-io {
+  width: 180px;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+#disasm-col {
+  flex: 1;
+  min-width: 0;
 }
 
 #disasm-section {
@@ -119,16 +92,41 @@ header h1 {
 #asm-list {
   flex: 1;
   overflow-y: auto;
-  min-height: 100px;
+  min-height: 80px;
 }
 
-/* Правая область — плоттер */
-#right-region {
-  width: 380px;
+/* Header */
+header {
+  padding: 4px 12px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
-  padding: 6px;
+}
+
+#header-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+#header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#header-controls .btn-row {
+  display: flex;
+  gap: 4px;
+}
+
+#header-controls .speed-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
 }
 
 /* Sections */
@@ -436,10 +434,7 @@ section h2 {
 
 /* Plotter section */
 #plotter-section {
-  border-top: 1px solid var(--border);
-  padding: 8px;
-  background: var(--bg);
-  flex-shrink: 0;
+  padding: 4px;
 }
 #plotter-section h2 {
   font-size: 11px;
@@ -450,31 +445,26 @@ section h2 {
 }
 #plotter-container {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 6px;
 }
 #plotter-canvas {
   border: 1px solid var(--border);
   border-radius: 4px;
   background: #f5f0e8;
   cursor: crosshair;
-  width: 800px;
-  height: 500px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1/1;
 }
 #plotter-info {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text);
+  flex-wrap: wrap;
 }
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
 /* Load status message */
 #load-status {
