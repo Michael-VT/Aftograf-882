@@ -1,4 +1,4 @@
-// Autograf-882 Debug Simulator — single-file bundle
+// Autograf-882 Debug Simulator -- bundle
 
 // --- settings.js ---
 
@@ -2323,13 +2323,11 @@ class App {
     const ctx = canvas.getContext('2d');
     const w = canvas.width, h = canvas.height;
 
-    // Clear
-    ctx.fillStyle = '#1a1b26';
+    ctx.fillStyle = '#f5f0e8';
     ctx.fillRect(0, 0, w, h);
 
     if (this.plotter.lines.length === 0) {
-      ctx.fillStyle = '#565f89';
-      ctx.font = '14px monospace';
+      ctx.fillStyle = '#b8b0a0';
       ctx.textAlign = 'center';
       ctx.fillText('Ожидание команд плоттера…', w / 2, h / 2);
       return;
@@ -2353,7 +2351,7 @@ class App {
     const sy = (y) => h - margin - (y - minY) * scale;
 
     // Draw grid
-    ctx.strokeStyle = '#2f3349';
+    ctx.strokeStyle = '#d8d0c0';
     ctx.lineWidth = 0.5;
     for (let g = 0; g < 10; g++) {
       const x = margin + (w - 2*margin) * g / 10;
@@ -2376,17 +2374,16 @@ class App {
       ctx.stroke();
     }
 
-    // Draw current position
-    if (this.plotter.penDown) {
-      ctx.fillStyle = '#ff9e64';
-    } else {
-      ctx.fillStyle = '#7dcfff';
-    }
+    // Текущая позиция
     const cx = sx(this.plotter.xPos);
     const cy = sy(this.plotter.yPos);
     ctx.beginPath();
-    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    ctx.fillStyle = this.plotter.penDown ? '#cc0000' : '#3366cc';
     ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
   }
 }
 

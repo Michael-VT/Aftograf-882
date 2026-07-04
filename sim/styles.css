@@ -286,8 +286,14 @@ section h2 {
   margin-right: 4px;
 }
 .asm-line.current {
-  background: #2f3349;
-  outline: 1px solid var(--hl);
+  background: rgba(125,207,255,0.12);
+  border-left: 3px solid var(--cyan);
+}
+.asm-line.current .asm-addr {
+  color: var(--cyan);
+}
+.asm-line.current .asm-bytes {
+  color: var(--cyan);
 }
 .asm-line.current .asm-mnemonic {
   color: var(--cyan);
