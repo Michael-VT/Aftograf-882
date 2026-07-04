@@ -1,4 +1,4 @@
-// Autograf-882 Debug Simulator -- bundle
+// Autograf-882 bundle
 
 
 
