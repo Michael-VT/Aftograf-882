@@ -3,52 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Autograf-882 — Debug Simulator</title>
-<link rel="stylesheet" href="styles.css?v=20260708">
+<title>Aftograf-882 Debuger v0.0.6</title>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div id="app">
-  <!-- Header: управление в две строки -->
   <header>
     <div id="header-main">
-      <h1>Автограф-882 отладчик</h1>
+      <h1>Aftograf-882 Debuger <span style="font-size:12px;color:var(--text-dim)">v0.0.6</span></h1>
       <div id="status-bar">
         <span id="status" class="status-stopped">STOPPED</span>
         <span id="cycle-count">0 T</span>
         <span id="ip-display">PC: ----</span>
       </div>
-      <button id="btn-settings" class="ctrl-btn" style="margin-left:auto;font-size:12px;padding:3px 8px;">⚙</button>
+      <div id="shortcuts-hint" style="font-size:10px;color:var(--text-dim);margin-left:12px">
+        <kbd>Space</kbd> Step <kbd>R</kbd> Reset <kbd>F5</kbd> Run/Pause <kbd>B</kbd> BP <kbd>J</kbd> Jump
+      </div>
+      <button id="btn-settings" class="ctrl-btn" style="margin-left:auto;font-size:12px;padding:3px 8px;">&#9881;</button>
     </div>
     <div id="header-controls">
       <div class="btn-row">
-        <button id="btn-reset" class="ctrl-btn">↺ Reset</button>
-        <button id="btn-step" class="ctrl-btn">→ Step</button>
-        <button id="btn-run" class="ctrl-btn">▶ Run</button>
-        <button id="btn-pause" class="ctrl-btn" disabled>⏸ Pause</button>
+        <button id="btn-reset" class="ctrl-btn">&#8634; Reset</button>
+        <button id="btn-step" class="ctrl-btn">&#8594; Step</button>
+        <button id="btn-run" class="ctrl-btn">&#9654; Run</button>
+        <button id="btn-pause" class="ctrl-btn" disabled>&#9208; Pause</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;font-size:10px">
+        <button id="btn-save-session" class="small-btn" title="Save session (CPU+RAM+BP+plotter)">&#128190; Session</button>
+        <button id="btn-load-session" class="small-btn" title="Load session">&#128194; Session</button>
+        <input type="file" id="session-file-input" accept=".json" style="display:none">
       </div>
       <div class="speed-row">
-        <label for="speed-slider">Скорость:</label>
+        <label for="speed-slider">Speed:</label>
         <input type="range" id="speed-slider" min="0" max="5" step="1" value="2">
         <span id="speed-label">1 KHz</span>
       </div>
-      <button id="btn-load-rom" class="ctrl-btn">📂</button>
+      <button id="btn-load-rom" class="ctrl-btn">&#128194;</button>
       <input type="file" id="rom-file-input" accept=".bin" multiple style="display:none">
-      <div id="load-status" class="load-status-info" style="display:none">—</div>
+      <div id="load-status" class="load-status-info" style="display:none">&mdash;</div>
     </div>
   </header>
-
   <div id="main-layout">
-    <!-- LEFT COLUMN: debug panels (narrow) -->
     <div id="left-region">
       <section id="registers">
         <h2>CPU</h2>
         <table id="reg-table">
-          <tr><td>A</td><td id="reg-a" class="reg-val">00</td><td>F</td><td id="reg-f" class="reg-val">00</td></tr>
-          <tr><td>B</td><td id="reg-b" class="reg-val">00</td><td>C</td><td id="reg-c" class="reg-val">00</td></tr>
-          <tr><td>D</td><td id="reg-d" class="reg-val">00</td><td>E</td><td id="reg-e" class="reg-val">00</td></tr>
-          <tr><td>H</td><td id="reg-h" class="reg-val">00</td><td>L</td><td id="reg-l" class="reg-val">00</td></tr>
-          <tr><td>SP</td><td id="reg-sp" class="reg-val" colspan="3">0000</td></tr>
-          <tr><td>PC</td><td id="reg-pc" class="reg-val hl-pc" colspan="3">0000</td></tr>
+          <tr><td>A</td><td id="reg-a" class="reg-val" tabindex="0">00</td><td>F</td><td id="reg-f" class="reg-val" tabindex="0">00</td></tr>
+          <tr><td>B</td><td id="reg-b" class="reg-val" tabindex="0">00</td><td>C</td><td id="reg-c" class="reg-val" tabindex="0">00</td></tr>
+          <tr><td>D</td><td id="reg-d" class="reg-val" tabindex="0">00</td><td>E</td><td id="reg-e" class="reg-val" tabindex="0">00</td></tr>
+          <tr><td>H</td><td id="reg-h" class="reg-val" tabindex="0">00</td><td>L</td><td id="reg-l" class="reg-val" tabindex="0">00</td></tr>
+          <tr><td>SP</td><td id="reg-sp" class="reg-val" tabindex="0" colspan="3">0000</td></tr>
+          <tr><td>PC</td><td id="reg-pc" class="reg-val hl-pc" tabindex="0" colspan="3">0000</td></tr>
         </table>
         <div id="flags">
           <span class="flag" id="flag-s">S</span>
@@ -58,67 +63,94 @@
           <span class="flag" id="flag-cy">CY</span>
         </div>
       </section>
-
       <section id="last-instruction">
-        <h2>Сейчас</h2>
-        <div id="current-insn" class="insn-display">—</div>
+        <h2>Current</h2>
+        <div id="current-insn" class="insn-display">&mdash;</div>
         <div id="current-bytes" class="bytes-display"></div>
       </section>
-
       <section id="stack-section">
-        <h2>Стек</h2>
-        <div id="stack-display" style="font-size:10px;font-family:var(--font-mono);color:var(--text-dim)">—</div>
+        <h2>Stack</h2>
+        <div id="stack-container" style="max-height:280px;overflow-y:auto">
+          <div id="stack-display" style="font-size:10px;font-family:var(--font-mono);color:var(--text-dim)">&mdash;</div>
+        </div>
       </section>
-
       <section id="pointers-section">
-        <h2>Указатели</h2>
-        <div id="pointers-display" style="font-size:10px;font-family:var(--font-mono);color:var(--text-dim)">—</div>
+        <h2>Pointers</h2>
+        <div id="pointers-display" style="font-size:10px;font-family:var(--font-mono);color:var(--text-dim)">&mdash;</div>
       </section>
-
       <section id="io-section">
         <h2>I/O</h2>
         <div id="io-panel" style="font-size:10px"></div>
       </section>
+      <section id="usart-section">
+        <h2>USART Terminal</h2>
+        <div id="usart-terminal">
+          <div id="usart-rx-log" style="font-size:10px;font-family:var(--font-mono);background:#1f2335;border:1px solid var(--border);border-radius:3px;padding:3px;height:80px;overflow-y:auto;resize:vertical;white-space:pre-wrap;word-break:break-all;color:var(--green)"></div>
+          <div style="display:flex;gap:4px;margin-top:3px">
+            <input type="text" id="usart-tx-input" placeholder="Hex bytes: 01 02 FF ..." style="flex:1;background:#1f2335;border:1px solid var(--border);color:var(--text);padding:2px 4px;border-radius:3px;font-family:var(--font-mono);font-size:10px">
+            <button id="usart-tx-send" class="small-btn" style="font-size:10px" title="Send bytes via USART">TX</button>
+            <button id="usart-tx-file" class="small-btn" style="font-size:10px" title="Send file (XOn-XOff)">&#128194;</button>
+            <button id="usart-clear" class="small-btn" style="font-size:10px">&#10005;</button>
+          </div>
+          <input type="file" id="usart-file-input" accept=".bin,.txt,.hex" style="display:none">
+          <div id="usart-status" style="font-size:9px;color:var(--text-dim);margin-top:2px">TXRDY RXRDY:&mdash;</div>
+        </div>
+      </section>
     </div>
-
-    <!-- CENTER COLUMN: disasm (top) + memory (bottom) -->
     <div id="center-region">
       <section id="disasm-section">
-        <h2>Дизассемблер</h2>
+        <h2>Disassembler</h2>
         <div id="toolbar-asm">
-          <label for="asm-search">🔍</label>
-          <input type="text" id="asm-search" placeholder="Адрес">
-          <label><input type="checkbox" id="asm-follow-pc" checked> Следить</label>
+          <label for="asm-search">&#128269;</label>
+          <input type="text" id="asm-search" placeholder="Address">
+          <label><input type="checkbox" id="asm-follow-pc" checked> Follow</label>
+          <button id="btn-copy-asm" class="small-btn" style="margin-left:auto;font-size:10px" title="Copy disasm to clipboard">&#128203;</button>
         </div>
         <div id="asm-list"></div>
       </section>
-
+      <div id="splitter" style="height:4px;background:var(--border);cursor:ns-resize;flex-shrink:0"></div>
       <section id="memory-section">
-        <h2>Память</h2>
+        <h2>Memory</h2>
         <div id="toolbar-mem">
-          <label for="mem-addr">Адрес:</label>
+          <label for="mem-addr">Addr:</label>
           <input type="text" id="mem-addr" value="6000" size="5">
-          <button id="mem-refresh" class="small-btn">⟳</button>
+          <button id="mem-refresh" class="small-btn">&#8635;</button>
+          <span style="color:var(--text-dim);font-size:10px">Click byte to edit</span>
         </div>
-        <div id="mem-dump"></div>
+        <div id="mem-container" style="flex:1;overflow-y:auto;min-height:60px">
+          <div id="mem-dump"></div>
+        </div>
       </section>
     </div>
-
-    <!-- RIGHT: plotter 1.5x wider, A4 portrait -->
     <div id="right-region">
       <section id="plotter-section">
-        <h2>Плоттер</h2>
-        <canvas id="plotter-canvas" width="600" height="848"></canvas>
-        <div id="plotter-info">
-          <span id="plotter-pos">X:0 Y:0</span>
-          <span id="plotter-pen">↑</span>
-          <span id="plotter-pen-num">#1</span>
-          <span id="plotter-color">—</span>
+        <h2>Plotter (A4)</h2>
+        <div id="plotter-container">
+          <canvas id="plotter-canvas" width="400" height="566"></canvas>
+          <div id="plotter-info">
+            <span id="plotter-pos">X:0 Y:0</span>
+            <span id="plotter-pen">&#8593;</span>
+            <span id="plotter-pen-num">#1</span>
+            <span id="plotter-color">&mdash;</span>
+            <span id="plotter-hpgl-progress" style="font-size:10px;color:var(--text-dim)"></span>
+          </div>
+          <div id="plotter-hpgl-cmd" style="font-size:10px;color:var(--yellow);font-family:var(--font-mono);min-height:14px;margin-top:2px"></div>
+        </div>
+        <div id="plotter-tools" style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;align-items:center">
+          <button id="plotter-clear" class="small-btn">&#10005; Clear</button>
+          <button id="plotter-autofit" class="small-btn">&#8862; Autofit</button>
+          <button id="btn-load-hpgl" class="small-btn" title="Load HPGL file">&#12820; HPGL</button>
+          <button id="hpgl-pause" class="small-btn" style="font-size:10px;display:none" title="Pause/Resume HPGL">&#9208;</button>
+          <input type="file" id="hpgl-file-input" accept=".hpgl,.plt,.hgl" style="display:none">
+          <label style="font-size:10px;color:var(--text-dim);margin-left:4px;cursor:pointer">
+            <input type="checkbox" id="hpgl-uart-mode"> UART
+          </label>
+          <span id="hpgl-status" style="font-size:10px;color:var(--text-dim);margin-left:4px"></span>
         </div>
       </section>
     </div>
   </div>
 </div>
-<script src="bundle.js?v=20260708"></script>
+<script src="bundle.js"></script>
 </body>
 </html>

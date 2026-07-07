@@ -23,6 +23,8 @@ export class CPU8080 {
     this.ie = false;    // interrupt-enable flip-flop
     this.halt = false;
     this.cycles = 0;
+    this.intr = false;   // interrupt pending (set by USART etc)
+    this.intrVector = 7; // RST vector for INTR (0-7)
 
     // Memory callbacks (injected by MMU)
     this.readByte = readByte;
@@ -99,15 +101,22 @@ export class CPU8080 {
   /* ─── Execute one instruction. Returns true if halted ─── */
   step() {
     if (this.halt) return true;
-    if (this.ie) { /* TODO: handle INTR — check INTE pin */ }
-
+    // Check interrupt
+    if (this.ie && this.intr) {
+      this.ie = false;
+      this.intr = false;
+      // RST 7 (vector $0038) — standard for USART
+      const vector = this.intrVector !== undefined ? this.intrVector : 7;
+      const addr = vector * 8;
+      this.pushWord(this.pc);
+      this.pc = addr;
+      this.cycles += 11;
+      return this.halt;
+    }
+    // Fetch and execute
     const opcode = this.fetchByte();
     const op = this.optable[opcode];
-    if (!op) {
-      // Undocumented opcode — treat as NOP
-      return false;
-    }
-
+    if (!op) return false;
     this.lastPC = this.pc - 1;
     op.exec();
     return this.halt;
@@ -132,6 +141,7 @@ export class CPU8080 {
     this.pc = 0;
     this.ie = false;
     this.halt = false;
+    this.intr = false;
     this.cycles = 0;
   }
 

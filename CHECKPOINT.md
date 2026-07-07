@@ -1,83 +1,91 @@
 # Autograf-882 Debug Simulator — Checkpoint
 
-**Date:** 2026-07-04  
-**State:** WORKING — CPU steps, disassembly renders, settings panel works, plotter draws.
+**Date:** 2026-07-05  
+**State:** WORKING — major feature update with editable registers/memory, USART terminal, A4 plotter.
 
 ## Project Structure
 
 ```
 ./
 ├── sim/                          ← Browser debug simulator
-│   ├── bundle.js                 Single-file JS (concat of 4 modules)
+│   ├── bundle.js                 Single-file JS (build from 4 modules)
+│   ├── build.js                  Bundle concatenation script
 │   ├── settings.js               SettingsManager + defaults + renderPanel()
 │   ├── memory.js                 MMU: ROM(24KB) + RAM(1KB) + I/O
 │   ├── cpu8080.js                Full 8080/К580ИК80 emulator, 256 opcodes
 │   ├── main.js                   App controller — UI, plotter, disasm, I/O devices
-│   ├── index.html                Layout: 3-column (debug | disasm+mem | plotter)
-│   ├── styles.css                Dark theme + A4 portrait plotter
+│   ├── index.html                Full 3-column layout with all panels
+│   ├── styles.css                Dark theme + A4 plotter + all new styles
 │   └── firmware.bin              24KB — concatenated 3x D2764A EPROMs
 ├── disasm8080.py                 Python recursive disassembler
 ├── autograf-882-disassembly.asm  Full listing (17792 lines)
 ├── Autograf-882-*Chip*.bin       3× 8KB ROM dumps
 ├── 01_Plotter-*-Schematic.pdf    Schematic (reverse-engineered)
-└── CHECKPOINT.md                 This file
+├── CHECKPOINT.md                 This file
+└── sim/build.js                  Bundle concatenation script
 ```
 
 ## Architecture (3-column layout)
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ Header: status + PC + [⚙ Settings]                          │
+│ Header: status + PC + [Space/R/F5/B shortcuts shown]        │
 │         [↺Reset][→Step][▶Run][⏸Pause] Speed:[===] [📂ROM] │
 ├────────┬───────────────────────────┬────────────────────────┤
-│ LEFT   │ CENTER                    │ RIGHT                  │
-│ 180px  │ Disasm (flex 1)           │ Plotter 400px          │
-│ CPU    │  6 columns:               │ Canvas 600×848         │
-│ regs   │  ● addr hex mnem op annot │ Paper background       │
-│ flags  │                           │ (A4 portrait 1:√2)     │
-│ Current│ Memory (fixed)            │ Grid + pen colors      │
-│ instr  │  Address + hex dump       │                        │
-│ Stack  │                           │                        │
-│ Pointers│                          │                        │
-│ I/O    │                           │                        │
+│ LEFT   │ CENTER                    │ RIGHT (A4)             │
+│ 200px  │ Disasm (flex 1)           │ Canvas fills height    │
+│ CPU    │  6 columns: addr hex mnem │ A4 portrait 1:√2       │
+│ regs*  │  op annot (follow PC)     │ Grid + pen colors      │
+│ flags* │ Scrollable memory (64KB)* │ Clear/Autofit buttons  │
+│ Current│  — click byte to edit*    │                        │
+│ instr  │  region-colored bytes*    │                        │
+│ Stack  │  toolbar: addr+refresh    │                        │
+│ (50w)* │                          │                        │
+│ Pointers│                         │                        │
+│ I/O    │                          │                        │
+│ USART* │                          │                        │
+│ (term) │                          │                        │
 └────────┴───────────────────────────┴────────────────────────┘
 ```
 
-## Disassembly columns
+* = New/Enhanced
 
-```
-● 0000  F3       DI
-  0001  3E 80    MVI A,80
-  0003  32 03 E4 STA E403     ; [E403]=$00
-  000F  C2 29 02 JNZ 0229     ; → $0229 ($17)
-```
+## New Features (2026-07-05)
 
-- Column 1: breakpoint marker (● / space)
-- Column 2: address (4-digit hex)
-- Column 3: instruction bytes (left-padded)
-- Column 4: mnemonic
-- Column 5: operands
-- Column 6: annotation — jump target, memory access, port name
+### 1. Редактирование регистров CPU
+- Клик по значению регистра (A, B, C, D, E, H, L, F, SP, PC) → inline input
+- Enter подтверждает, Esc отменяет
+- Флаги (S, Z, AC, P, CY) кликабельны — toggle
 
-## Features Working
+### 2. Память — прокрутка + редактирование
+- Виртуальная прокрутка всей 64KB памяти (16 строк × 4096 рядов)
+- Цветовая маркировка: ROM (серый), RAM (жёлтый), I/O (фиолетовый)
+- Клик по байту → inline edit; Tab → следующий байт
 
-- [x] CPU step / run / pause / reset
-- [x] Speed control (100Hz to 1MHz)
-- [x] Register display (A,B,C,D,E,H,L,SP,PC,flags)
-- [x] Disassembly with follow-PC scrolling
-- [x] Breakpoints (click line to toggle, pause on hit)
-- [x] Memory dump (any address, auto-refresh)
-- [x] Stack view (8 words from SP, →SP marker)
-- [x] Pointer view (HL→, DE→, BC→, SP→, PC→)
-- [x] I/O panel (PPI1, PPI2, PIT, USART)
-- [x] Plotter canvas (paper bg, grid, pen colors, position)
-- [x] Firmware auto-load (`firmware.bin` or 3 chip files)
-- [x] Settings panel (overlay):
-  - Load ROM at configurable address
-  - Chip offset configuration ($0000/$2000/$4000)
-  - Plotter variable addresses (X_POS, Y_POS, PEN_STATE, PEN_COLOR)
-  - Custom watch variables (add/remove/read)
-  - Save/reset configuration (localStorage)
+### 3. Стек — 50 слов
+- Показывает 50 слов (100 байт) от SP вверх
+- SP помечен маркером →SP
+- scrollable контейнер (max-height: 280px)
+
+### 4. Плоттер A4
+- Адаптивный размер: пропорция A4 (1:√2), высота на весь правый столбец
+- Retina-буфер (2× resolution)
+- Кнопки: Очистить холст, Автомасштаб
+
+### 5. USART терминал с XOn-XOff
+- Поле вывода (RX лог) с цветовой маркировкой
+- Поле ввода hex-байт для отправки CPU (например: `01 02 FF`)
+- Отправка файла с XOn-XOff протоколом (XOff=0x13, XOn=0x11)
+- Статус TXRDY/RXRDY, размер RX буфера
+
+### 6. Клавиатурные сокращения
+| Клавиша | Действие |
+|---------|----------|
+| Space   | Step     |
+| →       | Step     |
+| R       | Reset    |
+| F5      | Run/Pause|
+| B       | BP у PC  |
 
 ## Settings — RAM Watch Addresses
 
@@ -92,8 +100,6 @@ Default addresses (from firmware analysis):
 | PEN_STATE | $63F0   | Bit 0 = pen down (1) / up (0)    |
 | PEN_COLOR | $61E8   | Pen number 0–6                   |
 
-These are configurable via ⚙ Settings → Переменные плоттера.
-
 ## How to Run
 
 ```bash
@@ -104,21 +110,27 @@ python3 -m http.server 8080
 
 Firmware auto-loads on page load (look for green status message).
 
+## Build bundle.js
+
+```bash
+cd sim && node build.js
+```
+
 ## Known Issues
 
-1. Settings button sometimes unresponsive on first load — hard refresh fixes
-2. Memory dump shows zeros until firmware writes to RAM ($6000+)
-3. Plotter canvas blank until firmware sends stepper commands
-4. No INTR/interrupt handling in CPU emulator
-5. I/O device stubs are minimal (no real PIT counting, USART loopback)
+1. Memory virtual scroll jumps on rapid scroll — debounce pending
+2. No INTR/interrupt handling in CPU emulator
+3. I/O device stubs are simplified (no real PIT counting, PPI modes)
+4. Plotter canvas blank until firmware sends stepper commands
+5. USART terminal shows TX bytes but CPU doesn't have interrupt-driven RX
 
 ## Next Steps / Roadmap
 
 1. **Label mapping** — import labels from `.asm` listing into disassembly
-2. **Step-back** — reverse step / undo last N instructions
-3. **Register watchpoints** — break on register/value change
-4. **Memory editor** — poke values from UI
-5. **Export trace** — log execution to file
-6. **I/O accuracy** — proper PIT interrupt timing, USART flow control
-7. **Font table viewer** — visualize character data at $5E00-$5FFF
-8. **Assembly export** — reassemble modified ROM from simulator state
+2. **Step-back** — undo last N instructions
+3. **Conditional breakpoints** — break on register/value change
+4. **Export trace** — log execution to file
+5. **I/O accuracy** — proper PIT timing, PPI mode emulation
+6. **Font table viewer** — visualize character data at $5E00-$5FFF
+7. **Assembly export** — reassemble modified ROM
+8. **Save/restore snapshots** — save CPU+mém+plotter state to file

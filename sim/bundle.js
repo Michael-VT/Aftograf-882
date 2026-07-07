@@ -1,6 +1,15 @@
 // Autograf-882 bundle
 
-
+/**
+ * Settings Manager — Autograf-882 Debug Simulator
+ *
+ * Хранит конфигурацию в localStorage, предоставляет панель настроек.
+ *
+ * Секции:
+ *   chips:   адреса загрузки ROM-чипов
+ *   vars:    адреса отслеживаемых переменных (X, Y, перо, цвет)
+ *   custom:  пользовательские watch-переменные
+ */
 
 const STORAGE_KEY = 'aftograf-settings';
 
@@ -209,6 +218,21 @@ class SettingsManager {
 
 
 
+/**
+ * System Memory — Autograf-882 memory map
+ *
+ * $0000-$1FFF  ROM1 (D2764A)
+ * $2000-$3FFF  ROM2 (D2764A)
+ * $4000-$5FFF  ROM3 (D2764A)
+ * $6000-$63FF  RAM (КР537РУ10, 1024 bytes)
+ * $E000-$E3FF  PPI1 (КР580ВВ55А #1)
+ * $E400-$E7FF  PPI2 (КР580ВВ55А #2)
+ * $E800-$EBFF  PIT  (КР580ВИ53)
+ * $EC00-$EFFF  USART (КР580ВВ51А)
+ *
+ * Memory-mapped I/O: STA/LDA to $E000+ ports.
+ * OUT/IN instructions also map to $E000-FF.
+ */
 
 class MMU {
   constructor(ppi1, ppi2, pit, uart) {
@@ -220,6 +244,8 @@ class MMU {
     this.ppi2 = ppi2;
     this.pit = pit;
     this.uart = uart;
+    this.lastWriteAddr = -1; // address of last write (for debugger)
+    this.onInvalidWrite = null; // callback(addr, val) for writes outside RAM
   }
 
   /** Load a firmware image (byte array) at the given offset */
@@ -267,7 +293,7 @@ class MMU {
   writeByte(addr, val) {
     addr &= 0xffff;
     val &= 0xff;
-
+    this.lastWriteAddr = addr;
     if (addr >= 0x6000 && addr < 0x6400) {
       this.ram[addr & 0x3ff] = val;
       return;
@@ -288,7 +314,12 @@ class MMU {
       this.uart.write(addr & 0x01, val);
       return;
     }
-    // Writes to ROM are silently ignored
+    // Write to ROM or unmapped area — log error but continue
+    const region = addr < 0x6000 ? `ROM ($${addr.toString(16).padStart(4,'0').toUpperCase()})`
+      : addr < 0xe000 ? `свободная ($${addr.toString(16).padStart(4,'0').toUpperCase()})`
+      : `зарезервированная ($${addr.toString(16).padStart(4,'0').toUpperCase()})`;
+    console.warn(`[MMU] Запись $${val.toString(16).padStart(2,'0').toUpperCase()} в ${region} — игнорировано`);
+    if (this.onInvalidWrite) this.onInvalidWrite(addr, val);
   }
 
   /** Get a contiguous block for disassembler or memory dump */
@@ -313,6 +344,13 @@ class MMU {
 
 
 
+/**
+ * i8080 / К580ИК80 CPU Emulator
+ * Complete 256-opcode table-driven implementation.
+ *
+ * Flags: S(7) Z(6) AC(4) P(2) CY(0) — same bit positions as real 8080.
+ * CY bit: bit 0; AC bit: bit 4.
+ */
 
 const FLAG_CY  = 0x01;
 const FLAG_P   = 0x04;
@@ -331,6 +369,8 @@ class CPU8080 {
     this.ie = false;    // interrupt-enable flip-flop
     this.halt = false;
     this.cycles = 0;
+    this.intr = false;   // interrupt pending (set by USART etc)
+    this.intrVector = 7; // RST vector for INTR (0-7)
 
     // Memory callbacks (injected by MMU)
     this.readByte = readByte;
@@ -407,15 +447,22 @@ class CPU8080 {
   /* ─── Execute one instruction. Returns true if halted ─── */
   step() {
     if (this.halt) return true;
-    if (this.ie) { /* TODO: handle INTR — check INTE pin */ }
-
+    // Check interrupt
+    if (this.ie && this.intr) {
+      this.ie = false;
+      this.intr = false;
+      // RST 7 (vector $0038) — standard for USART
+      const vector = this.intrVector !== undefined ? this.intrVector : 7;
+      const addr = vector * 8;
+      this.pushWord(this.pc);
+      this.pc = addr;
+      this.cycles += 11;
+      return this.halt;
+    }
+    // Fetch and execute
     const opcode = this.fetchByte();
     const op = this.optable[opcode];
-    if (!op) {
-      // Undocumented opcode — treat as NOP
-      return false;
-    }
-
+    if (!op) return false;
     this.lastPC = this.pc - 1;
     op.exec();
     return this.halt;
@@ -440,6 +487,7 @@ class CPU8080 {
     this.pc = 0;
     this.ie = false;
     this.halt = false;
+    this.intr = false;
     this.cycles = 0;
   }
 
@@ -974,8 +1022,13 @@ function cpu_reg_idx2(r) {
 
 
 
-
-
+/**
+ * Autograf-882 Debug Simulator — Main Controller
+ *
+ * Wires CPU8080, MMU, I/O device stubs, disassembler, and debugger UI.
+ * Features: editable registers, scrollable+editable memory, USART terminal,
+ *           stack (50 words), A4 plotter, keyboard shortcuts.
+ */
 const PEN_COLORS = [
   { name: 'Чёрный',   stroke: '#000000' },
   { name: 'Красный',  stroke: '#cc0000' },
@@ -985,11 +1038,9 @@ const PEN_COLORS = [
   { name: 'Фиолетовый',stroke: '#8800cc' },
   { name: 'Голубой',  stroke: '#0099cc' },
 ];
-
 /* ═══════════════════════════════════════════════════════════════
  * I/O Device Stubs
  * ═══════════════════════════════════════════════════════════════ */
-
 /**
  * КР580ВВ55А (i8255) — Programmable Peripheral Interface
  * 3 ports (A, B, C) + control register.
@@ -1004,17 +1055,15 @@ class PPI8255 {
     this.mode = 0;
     this.modeSet = false;
   }
-
   read(reg) {
     switch (reg) {
       case 0: return this.portA;
       case 1: return this.portB;
       case 2: return this.portC;
-      case 3: return this.ctrl; // readback
+      case 3: return this.ctrl;
       default: return 0xff;
     }
   }
-
   write(reg, val) {
     switch (reg) {
       case 0: this.portA = val; break;
@@ -1023,15 +1072,12 @@ class PPI8255 {
       case 3:
         this.ctrl = val;
         if (val & 0x80) {
-          // Mode set
           this.modeSet = true;
           this.mode = (val >> 5) & 0x03;
         }
-        // BSR mode (bit set/reset on port C) — val & 0x80 == 0
         break;
     }
   }
-
   getState() {
     return {
       portA: this.portA, portB: this.portB, portC: this.portC,
@@ -1039,7 +1085,6 @@ class PPI8255 {
     };
   }
 }
-
 /**
  * КР580ВИ53 (i8253) — Programmable Interval Timer
  * 3 counters, each 16-bit, decrementing.
@@ -1047,23 +1092,19 @@ class PPI8255 {
 class PIT8253 {
   constructor() {
     this.ctrl = 0;
-    // Counters: { mode, latch, val, initial }
     this.counters = [
       { mode: 3, val: 0xffff, initial: 0xffff, latch: null, latched: false, bcd: false },
       { mode: 3, val: 0xffff, initial: 0xffff, latch: null, latched: false, bcd: false },
       { mode: 3, val: 0xffff, initial: 0xffff, latch: null, latched: false, bcd: false },
     ];
-    // Access state per counter: 0=LSB, 1=MSB, 2=both (LSB first)
     this.accessMode = [2, 2, 2];
-    this.writeToggle = [false, false, false]; // false=LSB, true=MSB
+    this.writeToggle = [false, false, false];
     this.readToggle = [false, false, false];
   }
-
   read(reg) {
     if (reg >= 0 && reg <= 2) {
       const ctr = this.counters[reg];
       if (ctr.latched) {
-        // Latch read — return latched value in two bytes
         const l = ctr.latch;
         if (!this.readToggle[reg]) {
           this.readToggle[reg] = true;
@@ -1075,16 +1116,12 @@ class PIT8253 {
           return (l >> 8) & 0xff;
         }
       }
-      // Direct read — return current value
       const val = ctr.val;
       if (this.accessMode[reg] === 0) {
-        // LSB only
         return val & 0xff;
       } else if (this.accessMode[reg] === 1) {
-        // MSB only
         return (val >> 8) & 0xff;
       } else {
-        // LSB then MSB
         if (!this.readToggle[reg]) {
           this.readToggle[reg] = true;
           return val & 0xff;
@@ -1094,9 +1131,8 @@ class PIT8253 {
         }
       }
     }
-    return 0xff; // reg 3 = control register (write-only)
+    return 0xff;
   }
-
   write(reg, val) {
     if (reg >= 0 && reg <= 2) {
       const ctr = this.counters[reg];
@@ -1120,12 +1156,9 @@ class PIT8253 {
       this.ctrl = val;
       const sel = (val >> 6) & 0x03;
       if (sel === 3) {
-        // Read-back command — ignore for stub
         return;
       }
-      // Latch command (bit 5,6 = counter, bit 4 = 0 for latch?)
       if (val & 0x80) {
-        // Mode set
         const ctr = this.counters[sel];
         ctr.mode = (val >> 1) & 0x07;
         if (ctr.mode > 5) ctr.mode = 5;
@@ -1135,7 +1168,6 @@ class PIT8253 {
         this.writeToggle[sel] = false;
         this.readToggle[sel] = false;
       } else {
-        // Latch counter
         const ctr = this.counters[val >> 6];
         if (!ctr.latched) {
           ctr.latch = ctr.val;
@@ -1145,18 +1177,15 @@ class PIT8253 {
       }
     }
   }
-
-  /** Tick all counters by 1 cycle (for PIT clock input simulation). */
   tick() {
     for (let i = 0; i < 3; i++) {
       const ctr = this.counters[i];
       ctr.val = (ctr.val - 1) & 0xffff;
       if (ctr.val === 0) {
-        ctr.val = ctr.initial; // auto-reload in mode 2/3
+        ctr.val = ctr.initial;
       }
     }
   }
-
   getState() {
     return this.counters.map((c, i) => ({
       mode: c.mode,
@@ -1165,57 +1194,123 @@ class PIT8253 {
     }));
   }
 }
-
 /**
- * КР580ВВ51А (i8251) — USART stub.
+ * КР580ВВ51А (i8251) — USART with terminal I/O and XOn-XOff.
+ *
+ * Хранит буфер принятых данных (RX) для чтения CPU.
+ * Буфер передачи (TX) отправляется в терминал.
+ * XOn/XOff: при заполнении RX буфера > 200 байт шлём XOff (0x13),
+ * при освобождении < 50 байт — XOn (0x11).
  */
 class USART8251 {
   constructor() {
     this.data = 0;
-    this.status = 0x01; // TXRDY bit set
+    this.status = 0x01; // TXRDY = 1
     this.ctrl = 0;
+    // RX buffer — данные от терминала к CPU
+    this.rxBuffer = [];
+    this.rxMax = 256;
+    // TX buffer — данные от CPU к терминалу
+    this.txBuffer = [];
+    // XOn-XOff flow control
+    this.xonSent = true;
+    this.xoffSent = false;
+    this.xonThreshold = 50;
+    this.xoffThreshold = 200;
+    // Callback for terminal output
+    this.onTxByte = null;
   }
-
+  /** CPU reads USART */
   read(reg) {
     if (reg === 0) {
-      // Data register
+      // Data register — return next RX byte
+      if (this.rxBuffer.length > 0) {
+        const byte = this.rxBuffer.shift();
+        this.data = byte;
+        // Re-check flow control
+        this._checkFlowControl();
+      }
       this.status &= ~0x02; // clear RXRDY
+      if (this.rxBuffer.length > 0) {
+        this.status |= 0x02; // still have data
+      }
       return this.data;
     } else {
       // Status register
       return this.status;
     }
   }
-
+  /** CPU writes USART */
   write(reg, val) {
     if (reg === 0) {
-      // Transmit data
+      // Transmit data — CPU sent a byte
       this.data = val;
+      this.txBuffer.push(val);
       this.status |= 0x01; // TXRDY
+      // Notify terminal
+      if (this.onTxByte) {
+        this.onTxByte(val);
+      }
     } else {
       // Control register
+      if (val & 0x10) {
+        // Reset
+        this.rxBuffer = [];
+        this.txBuffer = [];
+        this.status = 0x01;
+      }
       this.ctrl = val;
     }
   }
-
+  /** Terminal sends data to USART (RX path) */
+  receiveByte(byte) {
+    if (byte === 0x13) {
+      // XOff received — CPU should stop sending
+      this.status &= ~0x01; // clear TXRDY
+      return;
+    }
+    if (byte === 0x11) {
+      // XOn received — CPU may resume
+      this.status |= 0x01; // set TXRDY
+      return;
+    }
+    this.rxBuffer.push(byte);
+    this.status |= 0x02; // RXRDY
+    this._checkFlowControl();
+    // Trigger CPU interrupt
+    if (this.onRxInterrupt) this.onRxInterrupt();
+  }
+  _checkFlowControl() {
+    if (this.rxBuffer.length >= this.xoffThreshold && !this.xoffSent) {
+      // Send XOff — tell terminal to pause
+      this.xoffSent = true;
+      this.xonSent = false;
+      if (this.onTxByte) this.onTxByte(0x13);
+    } else if (this.rxBuffer.length <= this.xonThreshold && this.xoffSent) {
+      // Send XOn — tell terminal to resume
+      this.xoffSent = false;
+      this.xonSent = true;
+      if (this.onTxByte) this.onTxByte(0x11);
+    }
+  }
+  /** Get pending TX bytes for terminal display */
+  drainTx() {
+    const bytes = this.txBuffer.slice();
+    this.txBuffer = [];
+    return bytes;
+  }
   getState() {
-    return { data: this.data, status: this.status, ctrl: this.ctrl };
+    return {
+      data: this.data,
+      status: this.status,
+      ctrl: this.ctrl,
+      rxPending: this.rxBuffer.length,
+    };
   }
 }
-
 /* ═══════════════════════════════════════════════════════════════
  * Plotter Simulation
  * ═══════════════════════════════════════════════════════════════ */
-
-/**
- * Simulates the Autograf-882 XY plotter mechanics.
- * Stepper motors: 4-phase (or 2-phase with phase splitting).
- *
- * PPI1 port A → X stepper (bits 0-3 phases, bit 4-7 maybe enable/etc)
- * PPI1 port B → Y stepper (bits 0-3 phases)
- * PPI2 port A → pen control / misc
- * PPI2 port B → auxiliary
- */
 class Plotter {
   constructor(mmu, settings) {
     this.mmu = mmu;
@@ -1234,7 +1329,6 @@ class Plotter {
     this.lastMemY = -1;
     this.lastMemColor = -1;
   }
-
   syncFromMemory() {
     const s = this.settings;
     const xLo = this.mmu.peek(s.getAddr('X_POS_LO'));
@@ -1243,13 +1337,10 @@ class Plotter {
     const yHi = this.mmu.peek(s.getAddr('Y_POS_HI'));
     const pState = this.mmu.peek(s.getAddr('PEN_STATE'));
     const pColor = this.mmu.peek(s.getAddr('PEN_COLOR'));
-
     const memX = (xHi << 8) | xLo;
     const memY = (yHi << 8) | yLo;
     const memPenDown = !!(pState & 0x01);
     const memColor = pColor & 0x07;
-
-    // Координаты из RAM имеют приоритет
     if (memX !== this.lastMemX) {
       this.xPos = memX; this.x = memX;
       this.lastMemX = memX;
@@ -1258,13 +1349,10 @@ class Plotter {
       this.yPos = memY; this.y = memY;
       this.lastMemY = memY;
     }
-
-    // Состояние пера
     if (memPenDown !== this.lastMemPenState) {
       const wasDown = this.penDown;
       this.penDown = memPenDown;
       this.lastMemPenState = memPenDown;
-
       if (this.penDown && !wasDown) {
         this.currentSegment = { x1: this.xPos, y1: this.yPos, pen: this.penNum };
       } else if (!this.penDown && wasDown && this.currentSegment) {
@@ -1274,15 +1362,11 @@ class Plotter {
         this.currentSegment = null;
       }
     }
-
-    // Номер пера / цвет
     if (memColor !== this.lastMemColor) {
       this.penNum = Math.min(memColor, 6);
       this.lastMemColor = memColor;
     }
   }
-
-  /** Приращение от шагового двигателя (PPI write). */
   updateStepper(axis, phases) {
     const phase = phases & 0x0f;
     if (axis === 'x') {
@@ -1299,7 +1383,6 @@ class Plotter {
       this.lastYPhase = phase;
     }
   }
-
   _stepDir(prev, curr) {
     const ring = [0x1, 0x3, 0x2, 0x6, 0x4, 0xc, 0x8, 0x9];
     const pi = ring.indexOf(prev);
@@ -1308,15 +1391,12 @@ class Plotter {
     const diff = (ci - pi + 8) % 8;
     return (diff === 1 || diff === 2) ? 1 : -1;
   }
-
-  /** Состояние пера из PPI (запасной источник, пока RAM не пишет). */
   setPen(ctl) {
     if (this.lastMemPenState < 0) {
       const wasDown = this.penDown;
       this.penDown = !(ctl & 0x01);
       const pn = (ctl >> 1) & 0x07;
       if (pn < 7) this.penNum = pn;
-
       if (this.penDown && !wasDown) {
         this.currentSegment = { x1: this.xPos, y1: this.yPos, pen: this.penNum };
       } else if (!this.penDown && wasDown && this.currentSegment) {
@@ -1327,13 +1407,15 @@ class Plotter {
       }
     }
   }
-
   updatePosition() {
     if (this.penDown && !this.currentSegment) {
       this.currentSegment = { x1: this.xPos, y1: this.yPos, pen: this.penNum };
     }
   }
-
+  clearLines() {
+    this.lines = [];
+    this.currentSegment = null;
+  }
   reset() {
     this.x = 0; this.y = 0;
     this.xPos = 0; this.yPos = 0;
@@ -1346,7 +1428,6 @@ class Plotter {
     this.lines = [];
     this.currentSegment = null;
   }
-
   getState() {
     return {
       x: this.xPos, y: this.yPos,
@@ -1355,152 +1436,261 @@ class Plotter {
     };
   }
 }
-
 /* ═══════════════════════════════════════════════════════════════
  * Disassembler — reuses CPU opcode table
  * ═══════════════════════════════════════════════════════════════ */
-
 const REG_NAMES = ['B','C','D','E','H','L','M','A'];
 const COND_NAMES = ['NZ','Z','NC','C','PO','PE','P','M'];
-
 function buildDisasmTable() {
-  const T = new Array(256);
-
-  function def(code, mnem, size) {
-    T[code] = { mnemonic: mnem, size };
-  }
-
+  const t = [];
+  for (let i = 0; i < 256; i++) t[i] = null;
+  // Helper
+  const R = REG_NAMES;
+  const C = COND_NAMES;
+  const W = (a) => String.fromCharCode(a & 0xff);
+  const def = (op, mnem, size, fmt) => {
+    t[op] = { mnem, size, fmt: fmt || 'none' };
+  };
+  // NOP
+  def(0x00, 'NOP', 1);
+  // LXI B, D16
+  def(0x01, 'LXI B,$$$1', 3, 'word');
+  // STAX B
+  def(0x02, 'STAX B', 1);
+  // INX B
+  def(0x03, 'INX B', 1);
+  // INR B
+  def(0x04, 'INR B', 1);
+  // DCR B
+  def(0x05, 'DCR B', 1);
+  // MVI B, D8
+  def(0x06, 'MVI B,$$$1', 2, 'byte');
+  // RLC
+  def(0x07, 'RLC', 1);
+  // —
+  def(0x08, 'NOP', 1); // undocumented
+  // DAD B
+  def(0x09, 'DAD B', 1);
+  // LDAX B
+  def(0x0a, 'LDAX B', 1);
+  // DCX B
+  def(0x0b, 'DCX B', 1);
+  // INR C
+  def(0x0c, 'INR C', 1);
+  // DCR C
+  def(0x0d, 'DCR C', 1);
+  // MVI C, D8
+  def(0x0e, 'MVI C,$$$1', 2, 'byte');
+  // RRC
+  def(0x0f, 'RRC', 1);
+  // —
+  def(0x10, 'NOP', 1);
+  // LXI D, D16
+  def(0x11, 'LXI D,$$$1', 3, 'word');
+  // STAX D
+  def(0x12, 'STAX D', 1);
+  // INX D
+  def(0x13, 'INX D', 1);
+  // INR D
+  def(0x14, 'INR D', 1);
+  // DCR D
+  def(0x15, 'DCR D', 1);
+  // MVI D, D8
+  def(0x16, 'MVI D,$$$1', 2, 'byte');
+  // RAL
+  def(0x17, 'RAL', 1);
+  // —
+  def(0x18, 'NOP', 1);
+  // DAD D
+  def(0x19, 'DAD D', 1);
+  // LDAX D
+  def(0x1a, 'LDAX D', 1);
+  // DCX D
+  def(0x1b, 'DCX D', 1);
+  // INR E
+  def(0x1c, 'INR E', 1);
+  // DCR E
+  def(0x1d, 'DCR E', 1);
+  // MVI E, D8
+  def(0x1e, 'MVI E,$$$1', 2, 'byte');
+  // RAR
+  def(0x1f, 'RAR', 1);
+  // —
+  def(0x20, 'NOP', 1);
+  // LXI H, D16
+  def(0x21, 'LXI H,$$$1', 3, 'word');
+  // SHLD adr
+  def(0x22, 'SHLD $$$1', 3, 'word');
+  // INX H
+  def(0x23, 'INX H', 1);
+  // INR H
+  def(0x24, 'INR H', 1);
+  // DCR H
+  def(0x25, 'DCR H', 1);
+  // MVI H, D8
+  def(0x26, 'MVI H,$$$1', 2, 'byte');
+  // DAA
+  def(0x27, 'DAA', 1);
+  // —
+  def(0x28, 'NOP', 1);
+  // DAD H
+  def(0x29, 'DAD H', 1);
+  // LHLD adr
+  def(0x2a, 'LHLD $$$1', 3, 'word');
+  // DCX H
+  def(0x2b, 'DCX H', 1);
+  // INR L
+  def(0x2c, 'INR L', 1);
+  // DCR L
+  def(0x2d, 'DCR L', 1);
+  // MVI L, D8
+  def(0x2e, 'MVI L,$$$1', 2, 'byte');
+  // CMA
+  def(0x2f, 'CMA', 1);
+  // —
+  def(0x30, 'NOP', 1);
+  // LXI SP, D16
+  def(0x31, 'LXI SP,$$$1', 3, 'word');
+  // STA adr
+  def(0x32, 'STA $$$1', 3, 'word');
+  // INX SP
+  def(0x33, 'INX SP', 1);
+  // INR M
+  def(0x34, 'INR M', 1);
+  // DCR M
+  def(0x35, 'DCR M', 1);
+  // MVI M, D8
+  def(0x36, 'MVI M,$$$1', 2, 'byte');
+  // STC
+  def(0x37, 'STC', 1);
+  // —
+  def(0x38, 'NOP', 1);
+  // DAD SP
+  def(0x39, 'DAD SP', 1);
+  // LDA adr
+  def(0x3a, 'LDA $$$1', 3, 'word');
+  // DCX SP
+  def(0x3b, 'DCX SP', 1);
+  // INR A
+  def(0x3c, 'INR A', 1);
+  // DCR A
+  def(0x3d, 'DCR A', 1);
+  // MVI A, D8
+  def(0x3e, 'MVI A,$$$1', 2, 'byte');
+  // CMC
+  def(0x3f, 'CMC', 1);
+  // MOV B,B
+  def(0x40, 'MOV B,B', 1);
   for (let d = 0; d < 8; d++) {
     for (let s = 0; s < 8; s++) {
-      const code = (d << 3) | s | 0x40;
-      if (code === 0x76) { def(0x76, 'HLT', 1); continue; }
-      if (d === s) { def(code, 'NOP', 1); continue; }
-      const dst = REG_NAMES[d], src = REG_NAMES[s];
-      def(code, `MOV ${dst},${src}`, 1);
+      const op = 0x40 | (d << 3) | s;
+      if (op >= 0x40 && op <= 0x7f && !t[op]) {
+        def(op, `MOV ${R[d]},${R[s]}`, 1);
+      }
     }
   }
-
-  def(0x00, 'NOP', 1); def(0x08, 'NOP', 1); def(0x10, 'NOP', 1);
-  def(0x18, 'NOP', 1); def(0x20, 'NOP', 1); def(0x28, 'NOP', 1);
-  def(0x30, 'NOP', 1); def(0x38, 'NOP', 1);
-  def(0xcb, 'NOP', 1); def(0xd9, 'NOP', 1);
-  def(0xdd, 'NOP', 1); def(0xed, 'NOP', 1); def(0xfd, 'NOP', 1);
-
-  def(0x01, 'LXI B,$', 3); def(0x11, 'LXI D,$', 3);
-  def(0x21, 'LXI H,$', 3); def(0x31, 'LXI SP,$', 3);
-  def(0x02, 'STAX B', 1);  def(0x12, 'STAX D', 1);
-  def(0x03, 'INX B', 1);   def(0x13, 'INX D', 1);
-  def(0x23, 'INX H', 1);   def(0x33, 'INX SP', 1);
-  def(0x0b, 'DCX B', 1);   def(0x1b, 'DCX D', 1);
-  def(0x2b, 'DCX H', 1);   def(0x3b, 'DCX SP', 1);
-  def(0x09, 'DAD B', 1);   def(0x19, 'DAD D', 1);
-  def(0x29, 'DAD H', 1);   def(0x39, 'DAD SP', 1);
-  def(0x0a, 'LDAX B', 1);  def(0x1a, 'LDAX D', 1);
-  def(0x22, 'SHLD $', 3);  def(0x2a, 'LHLD $', 3);
-  def(0x32, 'STA $', 3);   def(0x3a, 'LDA $', 3);
-  def(0xeb, 'XCHG', 1);    def(0xe3, 'XTHL', 1);
-  def(0xf9, 'SPHL', 1);    def(0xe9, 'PCHL', 1);
-
-  const MVI_CODES = [0x06,0x0e,0x16,0x1e,0x26,0x2e,0x36,0x3e];
-  for (let i = 0; i < 8; i++) def(MVI_CODES[i], `MVI ${REG_NAMES[i]},$`, 2);
-
-  const INR_CODES = [0x3c,0x04,0x0c,0x14,0x1c,0x24,0x2c,0x34];
-  const DCR_CODES = [0x3d,0x05,0x0d,0x15,0x1d,0x25,0x2d,0x35];
-  for (let i = 0; i < 8; i++) {
-    def(INR_CODES[i], `INR ${REG_NAMES[i]}`, 1);
-    def(DCR_CODES[i], `DCR ${REG_NAMES[i]}`, 1);
+  // HLT is 0x76, which would be MOV M,M — override
+  def(0x76, 'HLT', 1);
+  def(0x7f, 'MOV A,A', 1);
+  // ADD r
+  for (let r = 0; r < 8; r++) def(0x80 + r, `ADD ${R[r]}`, 1);
+  // ADC r
+  for (let r = 0; r < 8; r++) def(0x88 + r, `ADC ${R[r]}`, 1);
+  // SUB r
+  for (let r = 0; r < 8; r++) def(0x90 + r, `SUB ${R[r]}`, 1);
+  // SBB r
+  for (let r = 0; r < 8; r++) def(0x98 + r, `SBB ${R[r]}`, 1);
+  // ANA r
+  for (let r = 0; r < 8; r++) def(0xa0 + r, `ANA ${R[r]}`, 1);
+  // XRA r
+  for (let r = 0; r < 8; r++) def(0xa8 + r, `XRA ${R[r]}`, 1);
+  // ORA r
+  for (let r = 0; r < 8; r++) def(0xb0 + r, `ORA ${R[r]}`, 1);
+  // CMP r
+  for (let r = 0; r < 8; r++) def(0xb8 + r, `CMP ${R[r]}`, 1);
+  // Conditional return / jump / call
+  for (let c = 0; c < 8; c++) {
+    def(0xc0 + c, `R${C[c]}`, 1);
+    def(0xc2 + c, `J${C[c]} $$$1`, 3, 'word');
+    def(0xc4 + c, `C${C[c]} $$$1`, 3, 'word');
   }
-
-  // Arithmetic
-  const ARITH = ['ADD','ADC','SUB','SBB','ANA','XRA','ORA','CMP'];
-  for (let a = 0; a < 8; a++) {
-    for (let r = 0; r < 8; r++) def(0x80 + a*8 + r, `${ARITH[a]} ${REG_NAMES[r]}`, 1);
-  }
-  const IMM_CODES = [0xc6,0xce,0xd6,0xde,0xe6,0xee,0xf6,0xfe];
-  for (let i = 0; i < 8; i++) def(IMM_CODES[i], `${ARITH[i]} $`, 2);
-
-  // Rotates
-  def(0x07, 'RLC', 1); def(0x0f, 'RRC', 1);
-  def(0x17, 'RAL', 1); def(0x1f, 'RAR', 1);
-  def(0x2f, 'CMA', 1); def(0x37, 'STC', 1);
-  def(0x3f, 'CMC', 1); def(0x27, 'DAA', 1);
-  def(0xfb, 'EI', 1);  def(0xf3, 'DI', 1);
-
-  // Jumps
-  def(0xc3, 'JMP $', 3); def(0xc2, 'JNZ $', 3);
-  def(0xca, 'JZ $', 3);  def(0xd2, 'JNC $', 3);
-  def(0xda, 'JC $', 3);  def(0xe2, 'JPO $', 3);
-  def(0xea, 'JPE $', 3); def(0xf2, 'JP $', 3);
-  def(0xfa, 'JM $', 3);
-
-  // Calls
-  def(0xcd, 'CALL $', 3); def(0xc4, 'CNZ $', 3);
-  def(0xcc, 'CZ $', 3);   def(0xd4, 'CNC $', 3);
-  def(0xdc, 'CC $', 3);   def(0xe4, 'CPO $', 3);
-  def(0xec, 'CPE $', 3);  def(0xf4, 'CP $', 3);
-  def(0xfc, 'CM $', 3);
-
-  // Returns
-  def(0xc9, 'RET', 1); def(0xc0, 'RNZ', 1);
-  def(0xc8, 'RZ', 1);  def(0xd0, 'RNC', 1);
-  def(0xd8, 'RC', 1);  def(0xe0, 'RPO', 1);
-  def(0xe8, 'RPE', 1); def(0xf0, 'RP', 1);
-  def(0xf8, 'RM', 1);
-
-  // RST
-  for (let i = 0; i < 8; i++) def(0xc7 | (i << 3), `RST ${i}`, 1);
-
-  // PUSH/POP
-  def(0xc5, 'PUSH B', 1);  def(0xd5, 'PUSH D', 1);
-  def(0xe5, 'PUSH H', 1);  def(0xf5, 'PUSH PSW', 1);
-  def(0xc1, 'POP B', 1);   def(0xd1, 'POP D', 1);
-  def(0xe1, 'POP H', 1);   def(0xf1, 'POP PSW', 1);
-
-  // IN/OUT
-  def(0xdb, 'IN $', 2);    def(0xd3, 'OUT $', 2);
-
-  return T;
+  def(0xc1, 'POP B', 1);
+  def(0xc3, 'JMP $$$1', 3, 'word');
+  def(0xc5, 'PUSH B', 1);
+  def(0xc6, 'ADI $$$1', 2, 'byte');
+  def(0xc7, 'RST 0', 1);
+  def(0xc9, 'RET', 1);
+  def(0xcb, 'JMP $$$1', 3, 'word');
+  def(0xcd, 'CALL $$$1', 3, 'word');
+  def(0xce, 'ACI $$$1', 2, 'byte');
+  def(0xcf, 'RST 1', 1);
+  // D1-D7
+  def(0xd1, 'POP D', 1);
+  def(0xd3, 'OUT $$$1', 2, 'port');
+  def(0xd5, 'PUSH D', 1);
+  def(0xd6, 'SUI $$$1', 2, 'byte');
+  def(0xd7, 'RST 2', 1);
+  def(0xda, 'JC $$$1', 3, 'word');
+  def(0xdb, 'IN $$$1', 2, 'port');
+  def(0xdc, 'CC $$$1', 3, 'word');
+  def(0xde, 'SBI $$$1', 2, 'byte');
+  def(0xdf, 'RST 3', 1);
+  // E1-E7
+  def(0xe1, 'POP H', 1);
+  def(0xe3, 'XTHL', 1);
+  def(0xe5, 'PUSH H', 1);
+  def(0xe6, 'ANI $$$1', 2, 'byte');
+  def(0xe7, 'RST 4', 1);
+  def(0xe9, 'PCHL', 1);
+  def(0xeb, 'XCHG', 1);
+  def(0xec, 'CPE $$$1', 3, 'word');
+  def(0xee, 'XRI $$$1', 2, 'byte');
+  def(0xef, 'RST 5', 1);
+  // F1-F7
+  def(0xf1, 'POP PSW', 1);
+  def(0xf3, 'DI', 1);
+  def(0xf5, 'PUSH PSW', 1);
+  def(0xf6, 'ORI $$$1', 2, 'byte');
+  def(0xf7, 'RST 6', 1);
+  def(0xf9, 'SPHL', 1);
+  def(0xfb, 'EI', 1);
+  def(0xfc, 'CM $$$1', 3, 'word');
+  def(0xfe, 'CPI $$$1', 2, 'byte');
+  def(0xff, 'RST 7', 1);
+  return t;
 }
-
-function disasmInstruction(mmu, addr) {
+function disasmInstruction(mmu, addr, optable) {
   const opcode = mmu.peek(addr);
-  const entry = DISASM_TABLE[opcode];
-  if (!entry) {
-    return { addr, opcode, mnemonic: 'DB $' + opcode.toString(16).padStart(2,'0').toUpperCase(), size: 1, operands: '' };
+  const op = optable ? optable[opcode] : null;
+  if (!op) {
+    return { addr, opcode, size: 1, mnemonic: 'DB $' + opcode.toString(16).padStart(2,'0').toUpperCase() };
   }
-  let mnem = entry.mnemonic;
-  const size = entry.size;
-  let operands = '';
+  let mnem = op.mnem;
+  const size = op.len;
   if (size >= 2) {
     const b1 = mmu.peek(addr + 1);
     if (size === 2) {
-      mnem = mnem.replace('$', b1.toString(16).padStart(2,'0').toUpperCase());
+      mnem = mnem.replace('$02', b1.toString(16).padStart(2,'0').toUpperCase());
     } else {
       const b2 = mmu.peek(addr + 2);
       const word = (b2 << 8) | b1;
-      mnem = mnem.replace('$', word.toString(16).padStart(4,'0').toUpperCase());
+      mnem = mnem.replace('$04$02', word.toString(16).padStart(4,'0').toUpperCase());
     }
   }
-  return { addr, opcode, mnemonic: mnem, size, operands };
+  return { addr, opcode, mnemonic: mnem, size };
 }
-
-const DISASM_TABLE = buildDisasmTable();
-
 /* ═══════════════════════════════════════════════════════════════
  * Port annotation helpers
  * ═══════════════════════════════════════════════════════════════ */
-
 const PORT_NAMES = {
   0xe000: 'PPI1-A', 0xe001: 'PPI1-B', 0xe002: 'PPI1-C', 0xe003: 'PPI1-CTRL',
   0xe400: 'PPI2-A', 0xe401: 'PPI2-B', 0xe402: 'PPI2-C', 0xe403: 'PPI2-CTRL',
   0xe800: 'PIT-CNT0', 0xe801: 'PIT-CNT1', 0xe802: 'PIT-CNT2', 0xe803: 'PIT-CTRL',
   0xec00: 'USART-DATA', 0xec01: 'USART-CTRL',
 };
-
 /* ═══════════════════════════════════════════════════════════════
  * App Controller
  * ═══════════════════════════════════════════════════════════════ */
-
 class App {
   constructor() {
     try {
@@ -1510,9 +1700,7 @@ class App {
       this._showFatalError(e);
     }
   }
-
   _showFatalError(e) {
-    // Показываем ошибку прямо на странице, если всё упало
     const root = document.getElementById('app') || document.body;
     const div = document.createElement('div');
     div.style.cssText = 'padding:20px;margin:20px;background:#1a1b26;border:2px solid #f7768e;border-radius:8px;font-family:monospace;font-size:13px;color:#f7768e';
@@ -1523,29 +1711,19 @@ class App {
       + '<p style="color:#565f89;margin:10px 0 0 0">Открой F12 → Console для деталей</p>';
     root.prepend(div);
   }
-
   _construct() {
-    // Settings (из localStorage)
     this.settings = new SettingsManager();
-    // I/O devices
     this.ppi1 = new PPI8255('PPI1');
     this.ppi2 = new PPI8255('PPI2');
     this.pit = new PIT8253();
     this.uart = new USART8251();
-
-    // Memory
     this.mmu = new MMU(this.ppi1, this.ppi2, this.pit, this.uart);
-
-    // CPU
+    this.mmu.onInvalidWrite = (addr, val) => this._onInvalidWrite(addr, val);
     this.cpu = new CPU8080(
       (addr) => this.mmu.readByte(addr),
       (addr, val) => this.mmu.writeByte(addr, val)
     );
-
-    // Plotter
     this.plotter = new Plotter(this.mmu, this.settings);
-
-    // State
     this.running = false;
     this.paused = false;
     this.runTimer = null;
@@ -1553,22 +1731,32 @@ class App {
     this.breakpoints = new Set();
     this.speedTable = [0, 100, 1000, 10000, 100000, 1000000];
     this.labelMap = {};
-
-    // Disassembly cache
     this.disasmCache = [];
     this.disasmAddr = 0;
-
-    // DOM refs — отказоустойчиво
+    // Memory dump state
+    this.memScrollAddr = 0x6000;
+    this.editingByte = null; // { addr, element }
+    // USART terminal state
+    this.usartTxLog = '';
+    this.usartAutoScroll = true;
+    // HPGL state
+    this.hpglTotal = 0;
+    this.hpglCurrent = 0;
+    this.hpglCmdText = '';
+    this.hpglCmds = [];
+    this._asmHoverAddr = null;
+    this._hpglPaused = false;
+    this._firmwareLoaded = false;
+    this._memUpdating = false;
     this._cacheDOM();
     this._bindEvents();
     this._resetState();
-
-    // Build initial disassembly
-    this._rebuildDisasm(0);
+    // Show placeholder until firmware loads
+    this.els.asmList.innerHTML = '<div style="color:var(--text-dim);padding:20px;text-align:center;font-size:12px;font-family:var(--font-mono)">Waiting for firmware...</div>';
     this._updateMemoryDump(0x6000);
     this._updateIO();
+    this._setupPlotterResize();
   }
-
   _cacheDOM() {
     this.$ = (id) => document.getElementById(id);
     this.els = {
@@ -1588,6 +1776,7 @@ class App {
       asmSearch: this.$('asm-search'),
       asmFollowPc: this.$('asm-follow-pc'),
       memDump: this.$('mem-dump'),
+      memContainer: this.$('mem-container'),
       memAddr: this.$('mem-addr'),
       memRefresh: this.$('mem-refresh'),
       ioPanel: this.$('io-panel'),
@@ -1603,47 +1792,373 @@ class App {
       plotterPos: this.$('plotter-pos'),
       plotterPen: this.$('plotter-pen'),
       plotterPenNum: this.$('plotter-pen-num'),
+      plotterClear: this.$('plotter-clear'),
+      plotterAutofit: this.$('plotter-autofit'),
       loadStatus: this.$('load-status'),
       plotterColor: this.$('plotter-color'),
       btnSettings: this.$('btn-settings'),
       stackDisplay: this.$('stack-display'),
       pointersDisplay: this.$('pointers-display'),
+      usartRxLog: this.$('usart-rx-log'),
+      usartTxInput: this.$('usart-tx-input'),
+      usartTxSend: this.$('usart-tx-send'),
+      usartTxFile: this.$('usart-tx-file'),
+      usartFileInput: this.$('usart-file-input'),
+      usartClear: this.$('usart-clear'),
+      usartStatus: this.$('usart-status'),
+      btnSaveSession: this.$('btn-save-session'),
+      btnLoadSession: this.$('btn-load-session'),
+      sessionFileInput: this.$('session-file-input'),
+      btnLoadHpgl: this.$('btn-load-hpgl'),
+      hpglFileInput: this.$('hpgl-file-input'),
+      hpglStatus: this.$('hpgl-status'),
+      hpglProgress: this.$('plotter-hpgl-progress'),
+      hpglCmd: this.$('plotter-hpgl-cmd'),
+      hpglUartMode: this.$('hpgl-uart-mode'),
+      hpglPause: this.$('hpgl-pause'),
+      btnCopyAsm: this.$('btn-copy-asm'),
     };
   }
-
   _bindEvents() {
-    this.els.btnReset.addEventListener('click', () => this.reset());
-    this.els.btnStep.addEventListener('click', () => this.step());
-    this.els.btnRun.addEventListener('click', () => this.run());
-    this.els.btnPause.addEventListener('click', () => this.pause());
-    this.els.speedSlider.addEventListener('input', () => {
+    if (this.els.btnReset) this.els.btnReset.addEventListener('click', () => this.reset());
+    if (this.els.btnStep) this.els.btnStep.addEventListener('click', () => this.step());
+    if (this.els.btnRun) this.els.btnRun.addEventListener('click', () => this.run());
+    if (this.els.btnPause) this.els.btnPause.addEventListener('click', () => this.pause());
+    if (this.els.speedSlider) this.els.speedSlider.addEventListener('input', () => {
       const idx = parseInt(this.els.speedSlider.value);
       const speeds = ['∞ (макс)', '100 Hz', '1 KHz', '10 KHz', '100 KHz', '1 MHz'];
       this.els.speedLabel.textContent = speeds[idx];
     });
-    this.els.btnLoadRom.addEventListener('click', () => this.els.romFileInput.click());
-    this.els.btnSettings.addEventListener('click', () => {
-      console.log('[AFTOGRAF] Settings button clicked');
+    if (this.els.btnLoadRom) this.els.btnLoadRom.addEventListener('click', () => this.els.romFileInput.click());
+    if (this.els.btnSettings) this.els.btnSettings.addEventListener('click', () => {
       this._openSettings();
     });
-    this.els.romFileInput.addEventListener('change', (e) => this._handleROMFiles(e));
-    this.els.asmSearch.addEventListener('keydown', (e) => {
+    if (this.els.romFileInput) this.els.romFileInput.addEventListener('change', (e) => this._handleROMFiles(e));
+    if (this.els.asmSearch) this.els.asmSearch.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         const addr = parseInt(this.els.asmSearch.value, 16);
         if (!isNaN(addr)) this._rebuildDisasm(addr);
       }
     });
-    this.els.memRefresh.addEventListener('click', () => {
-      const addr = parseInt(this.els.memAddr.value, 16);
-      if (!isNaN(addr)) this._updateMemoryDump(addr);
+    // Infinite scroll for disassembler
+    if (this.els.asmList) this.els.asmList.addEventListener('scroll', () => {
+      const list = this.els.asmList;
+      if (!list || list.scrollHeight <= list.clientHeight) return;
+      const scrollPct = list.scrollTop / (list.scrollHeight - list.clientHeight);
+      if (scrollPct > 0.85 && this._asmLastAddr < 0xfff0) this._appendDisasm();
+      else if (scrollPct < 0.05 && this._asmFirstAddr > 0) this._prependDisasm();
     });
-    this.els.memAddr.addEventListener('keydown', (e) => {
+    // Copy disassembly range
+    if (this.els.btnCopyAsm) this.els.btnCopyAsm.addEventListener('click', () => this._copyDisasmRange());
+    if (this.els.memRefresh) this.els.memRefresh.addEventListener('click', () => {
+      const addr = parseInt(this.els.memAddr.value, 16);
+      if (!isNaN(addr)) { this.memScrollAddr = addr; this._updateMemoryDump(addr); }
+    });
+    if (this.els.memAddr) this.els.memAddr.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
-        this.els.memRefresh.click();
+        const addr = parseInt(this.els.memAddr.value.trim().replace(/^\$/,''), 16);
+        if (!isNaN(addr)) { this.memScrollAddr = addr & 0xfff0; this._updateMemoryDump(this.memScrollAddr); }
       }
     });
+    if (this.els.memContainer) this.els.memContainer.addEventListener('scroll', () => this._onMemScroll());
+    this._setupRegisterEditing();
+    this._setupUSARTTerminal();
+    if (this.els.plotterClear) this.els.plotterClear.addEventListener('click', () => { this.plotter.clearLines(); this._renderPlotterCanvas(); });
+    if (this.els.plotterAutofit) this.els.plotterAutofit.addEventListener('click', () => this._renderPlotterCanvas(true));
+    if (this.els.btnSaveSession) this.els.btnSaveSession.addEventListener('click', () => this._saveSession());
+    if (this.els.btnLoadSession) this.els.btnLoadSession.addEventListener('click', () => this.els.sessionFileInput.click());
+    if (this.els.sessionFileInput) this.els.sessionFileInput.addEventListener('change', (e) => this._loadSession(e));
+    if (this.els.btnLoadHpgl) this.els.btnLoadHpgl.addEventListener('click', () => this.els.hpglFileInput.click());
+    if (this.els.hpglFileInput) this.els.hpglFileInput.addEventListener('change', (e) => this._loadHPGL(e));
+    if (this.els.hpglPause) this.els.hpglPause.addEventListener('click', () => {
+      this._hpglPaused = !this._hpglPaused;
+      this.els.hpglPause.textContent = this._hpglPaused ? '\u25B6' : '\u23F8';
+    });
+    this.uart.onTxByte = (byte) => this._onUSARTTxByte(byte);
+    this.uart.onRxInterrupt = () => { this.cpu.intr = true; };
+    document.addEventListener('keydown', (e) => this._onKeyDown(e));
+    window.addEventListener('resize', () => this._updatePlotterSize());
+    this._setupSplitter();
   }
-
+  /* ═══════════════════════════════════════════════════════════════
+   * Keyboard shortcuts
+   * ═══════════════════════════════════════════════════════════════ */
+  _onKeyDown(e) {
+    // Don't hijack when typing in inputs
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    switch (e.key) {
+      case ' ':
+      case 'ArrowRight':
+        e.preventDefault();
+        this.step();
+        break;
+      case 'r':
+      case 'R':
+        this.reset();
+        break;
+      case 'F5':
+        e.preventDefault();
+        if (this.running) this.pause();
+        else this.run();
+        break;
+      case 'b':
+      case 'B':
+        if (this.breakpoints.has(this.cpu.pc)) {
+          this.breakpoints.delete(this.cpu.pc);
+        } else {
+          this.breakpoints.add(this.cpu.pc);
+        }
+        this._renderDisasm();
+        break;
+      case 'j':
+      case 'J':
+        // Jump PC to hovered address in disasm
+        if (this._asmHoverAddr !== undefined && this._asmHoverAddr !== null) {
+          this.cpu.pc = this._asmHoverAddr;
+          this._updateAll();
+          if (this.els.asmFollowPc.checked) this._ensureVisible(this.cpu.pc);
+        }
+        break;
+    }
+  }
+  /* ═══════════════════════════════════════════════════════════════
+   * Plotter A4 resize
+   * ═══════════════════════════════════════════════════════════════ */
+  _setupPlotterResize() {
+    this._updatePlotterSize();
+    if (window.ResizeObserver) {
+      const obs = new ResizeObserver(() => this._updatePlotterSize());
+      obs.observe(this.els.plotterCanvas.parentElement);
+    }
+  }
+  _updatePlotterSize() {
+    const canvas = this.els.plotterCanvas;
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    const availHeight = parent.clientHeight - 30; // info line
+    const availWidth = window.innerWidth * 0.25; // max ~25% of viewport
+    // A4 portrait: w/h = 1/√2 ≈ 0.707
+    const a4Ratio = 1 / Math.SQRT2;
+    let h = Math.min(availHeight, window.innerHeight - 160);
+    let w = h * a4Ratio;
+    if (w > availWidth) {
+      w = Math.max(availWidth, 250);
+      h = w / a4Ratio;
+    }
+    w = Math.max(w, 200);
+    h = Math.max(h, 280);
+    canvas.style.width = Math.floor(w) + 'px';
+    canvas.style.height = Math.floor(h) + 'px';
+    canvas.width = Math.floor(w * 2); // retina-scale canvas buffer
+    canvas.height = Math.floor(h * 2);
+  }
+  /* ═══════════════════════════════════════════════════════════════
+   * Resizable splitter (disasm / memory)
+   * ═══════════════════════════════════════════════════════════════ */
+  _setupSplitter() {
+    const splitter = document.getElementById('splitter');
+    const disasmSection = document.getElementById('disasm-section');
+    const memSection = document.getElementById('memory-section');
+    if (!splitter || !disasmSection || !memSection) return;
+    let dragging = false;
+    splitter.addEventListener('mousedown', (e) => {
+      dragging = true;
+      document.body.style.cursor = 'ns-resize';
+      document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const center = document.getElementById('center-region');
+      if (!center) return;
+      const rect = center.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const minDisasm = 100;
+      const minMem = 80;
+      const total = rect.height;
+      const disasmH = Math.max(minDisasm, Math.min(total - minMem, y));
+      const memH = Math.max(minMem, total - disasmH);
+      disasmSection.style.flex = 'none';
+      disasmSection.style.height = disasmH + 'px';
+      memSection.style.flex = 'none';
+      memSection.style.height = memH + 'px';
+    });
+    document.addEventListener('mouseup', () => {
+      dragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+  }
+  /* ═══════════════════════════════════════════════════════════════
+   * Editable registers
+   * ═══════════════════════════════════════════════════════════════ */
+  _setupRegisterEditing() {
+    const regs8 = ['regA','regB','regC','regD','regE','regH','regL','regF'];
+    const regs16 = ['regSP','regPC'];
+    const regMap8 = { regA:'a', regB:'b', regC:'c', regD:'d', regE:'e', regH:'h', regL:'l', regF:'flags' };
+    const regMap16 = { regSP:'sp', regPC:'pc' };
+    for (const key of regs8) {
+      const el = this.els[key];
+      if (!el) continue;
+      el.addEventListener('click', () => {
+        if (el.classList.contains('editing')) return;
+        const cur = el.textContent;
+        el.innerHTML = `<input class="reg-val-inp" type="text" value="${cur}" maxlength="2" style="width:32px">`;
+        el.classList.add('editing');
+        const inp = el.querySelector('input');
+        inp.focus();
+        inp.select();
+        const finish = () => {
+          const raw = inp.value.trim().toLowerCase();
+          let val = parseInt(raw, 16);
+          if (isNaN(val)) val = parseInt(cur, 16);
+          val = Math.min(0xff, Math.max(0, val));
+          this.cpu[regMap8[key]] = val;
+          el.classList.remove('editing');
+          this._updateAll();
+        };
+        inp.addEventListener('blur', finish);
+        inp.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { inp.blur(); }
+          if (ev.key === 'Escape') { el.innerHTML = cur; el.classList.remove('editing'); }
+        });
+      });
+    }
+    for (const key of regs16) {
+      const el = this.els[key];
+      if (!el) continue;
+      el.addEventListener('click', () => {
+        if (el.classList.contains('editing')) return;
+        const cur = el.textContent;
+        el.innerHTML = `<input class="reg-val-inp pc-sp" type="text" value="${cur}" maxlength="4">`;
+        el.classList.add('editing');
+        const inp = el.querySelector('input');
+        inp.focus();
+        inp.select();
+        const finish = () => {
+          const raw = inp.value.trim().toLowerCase();
+          let val = parseInt(raw, 16);
+          if (isNaN(val)) val = parseInt(cur, 16);
+          val = Math.min(0xffff, Math.max(0, val));
+          this.cpu[regMap16[key]] = val;
+          el.classList.remove('editing');
+          this._updateAll();
+        };
+        inp.addEventListener('blur', finish);
+        inp.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { inp.blur(); }
+          if (ev.key === 'Escape') { el.innerHTML = cur; el.classList.remove('editing'); }
+        });
+      });
+    }
+    // Click flags to toggle
+    ['flagS','flagZ','flagAC','flagP','flagCY'].forEach(key => {
+      const el = this.els[key];
+      if (!el) return;
+      el.classList.add('clickable');
+      el.addEventListener('click', () => {
+        let bit;
+        switch (key) {
+          case 'flagS': bit = 0x80; break;
+          case 'flagZ': bit = 0x40; break;
+          case 'flagAC': bit = 0x10; break;
+          case 'flagP': bit = 0x04; break;
+          case 'flagCY': bit = 0x01; break;
+        }
+        this.cpu.flags ^= bit;
+        this.cpu.flags |= 0x02; // keep bit 1 always set (8080)
+        this._updateRegisters();
+      });
+    });
+  }
+  /* ═══════════════════════════════════════════════════════════════
+   * USART Terminal
+   * ═══════════════════════════════════════════════════════════════ */
+  _setupUSARTTerminal() {
+    this.els.usartTxSend.addEventListener('click', () => this._sendUSARTBytes());
+    this.els.usartTxInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this._sendUSARTBytes();
+    });
+    this.els.usartTxFile.addEventListener('click', () => this.els.usartFileInput.click());
+    this.els.usartFileInput.addEventListener('change', (e) => this._sendUSARTFile(e));
+    this.els.usartClear.addEventListener('click', () => {
+      this.usartTxLog = '';
+      this.els.usartRxLog.textContent = '';
+    });
+  }
+  _sendUSARTBytes() {
+    const raw = this.els.usartTxInput.value.trim();
+    if (!raw) return;
+    // Parse hex bytes: "01 02 FF" or "01,02,FF"
+    const parts = raw.split(/[\s,;]+/);
+    for (const p of parts) {
+      const b = parseInt(p, 16);
+      if (!isNaN(b) && b >= 0 && b <= 0xff) {
+        this.uart.receiveByte(b);
+        this._logToUSART(`→ $${b.toString(16).padStart(2,'0').toUpperCase()}`, 'var(--cyan)');
+      }
+    }
+    this.els.usartTxInput.value = '';
+    this._updateUSARTStatus();
+  }
+  async _sendUSARTFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    this._logToUSART(`📂 Файл: ${file.name} (${bytes.length} B)`, 'var(--yellow)');
+    this._logToUSART(`  XOn-XOff: отправка...`, 'var(--text-dim)');
+    // Send with XOn-XOff pacing
+    let i = 0;
+    const sendNext = () => {
+      const batch = 16;
+      for (let j = 0; j < batch && i < bytes.length; j++, i++) {
+        this.uart.receiveByte(bytes[i]);
+      }
+      this._logToUSART(`· ${i}/${bytes.length}`, 'var(--text-dim)');
+      this._updateUSARTStatus();
+      if (i < bytes.length) {
+        setTimeout(sendNext, 5);
+      } else {
+        this._logToUSART(`✓ Передача завершена`, 'var(--green)');
+      }
+    };
+    sendNext();
+    event.target.value = '';
+  }
+  _onUSARTTxByte(byte) {
+    // Show printable chars directly, hex for others
+    const c = (byte >= 0x20 && byte <= 0x7e) ? String.fromCharCode(byte) : '';
+    const hex = `$${byte.toString(16).padStart(2,'0').toUpperCase()}`;
+    if (byte === 0x13) {
+      this._logToUSART(`[XOff]`, 'var(--yellow)');
+    } else if (byte === 0x11) {
+      this._logToUSART(`[XOn]`, 'var(--green)');
+    } else if (c) {
+      this._logToUSART(c, 'var(--text)');
+    } else {
+      this._logToUSART(`<${hex}>`, 'var(--text-dim)');
+    }
+    this._updateUSARTStatus();
+  }
+  _logToUSART(text, color) {
+    const el = this.els.usartRxLog;
+    if (!el) return;
+    const span = document.createElement('span');
+    span.textContent = text;
+    if (color) span.style.color = color;
+    el.appendChild(span);
+    el.scrollTop = el.scrollHeight;
+  }
+  _updateUSARTStatus() {
+    const el = this.els.usartStatus;
+    if (!el) return;
+    const s = this.uart.status;
+    const txrdy = s & 0x01 ? '✓' : '✕';
+    const rxrdy = s & 0x02 ? '✓' : '✕';
+    const rxQ = this.uart.rxBuffer.length;
+    el.textContent = `TXRDY:${txrdy} RXRDY:${rxrdy} RXQ:${rxQ} | TX:${this.uart.txBuffer.length}B`;
+  }
   _resetState() {
     this.paused = false;
     this.running = false;
@@ -1653,7 +2168,6 @@ class App {
     this.els.btnStep.disabled = !this.romLoaded;
     this._updateStatusBar();
   }
-
   _updateStatusBar() {
     const s = this.els.status;
     if (this.cpu.halt) {
@@ -1673,54 +2187,37 @@ class App {
     this.els.cycleCount.textContent = `${this.cpu.cycles} T-states`;
     this.els.ipDisplay.textContent = `PC: ${this.cpu.pc.toString(16).padStart(4,'0').toUpperCase()}`;
   }
-  /** Load ROM from file input.
-   *  Поддерживает:
-   *  - Один файл 24KB (firmware.bin) — все 3 чипа сразу
-   *  - Один файл 8KB — загружается как Chip 1
-   *  - Три файла 8KB — загружаются по порядку
-   */
   async _handleROMFiles(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
-
     const buffers = [];
     for (const file of files) {
       const buf = await file.arrayBuffer();
       buffers.push(new Uint8Array(buf));
     }
-
     const totalBytes = buffers.reduce((s, b) => s + b.length, 0);
-
-    // Создаём новый MMU
     this.mmu = new MMU(this.ppi1, this.ppi2, this.pit, this.uart);
-
+    this.mmu.onInvalidWrite = (addr, val) => this._onInvalidWrite(addr, val);
     if (buffers.length === 1 && buffers[0].length === 0x6000) {
-      // Один файл 24KB — firmware.bin
       this.mmu.loadROM(buffers[0], 0x0000);
       this._setLoadStatus(`Загружена прошивка 24KB (3 чипа)`, 'ok');
     } else if (buffers.length === 1 && buffers[0].length === 0x2000) {
-      // Один чип 8KB
       this.mmu.loadROM(buffers[0], 0x0000);
       this._setLoadStatus(`Загружен Chip 1 (8KB)`, 'ok');
     } else {
-      // Несколько файлов — по порядку
       const sorted = Array.from(buffers).sort((a, b) => a.length - b.length);
       for (let i = 0; i < Math.min(sorted.length, 3); i++) {
         this.mmu.loadROM(sorted[i], i * 0x2000);
       }
       this._setLoadStatus(`Загружено ${Math.min(sorted.length, 3)} чипа(ов)`, 'ok');
     }
-
     this.romLoaded = true;
-
-    // Пересоздаём CPU с новым MMU
     this.cpu = new CPU8080(
       (addr) => this.mmu.readByte(addr),
       (addr, val) => this.mmu.writeByte(addr, val)
     );
     this.plotter.reset();
     this.breakpoints.clear();
-
     this._resetState();
     this._rebuildDisasm(0);
     this._updateMemoryDump(0x6000);
@@ -1728,7 +2225,6 @@ class App {
     this._updatePlotterUI();
     this.els.btnStep.disabled = false;
   }
-
   _setLoadStatus(msg, type) {
     const el = this.els.loadStatus;
     if (!el) return;
@@ -1739,11 +2235,9 @@ class App {
       setTimeout(() => { el.style.display = 'none'; }, 5000);
     }
   }
-
-  /* ═══════════════════════════════════
-   * Settings Panel
-   * ═══════════════════════════════════ */
-
+  /* ═══════════════════════════════════════════════════════════════
+   * Settings Panel (unchanged)
+   * ═══════════════════════════════════════════════════════════════ */
   _openSettings() {
     try {
       console.log('[AFTOGRAF] Opening settings panel...');
@@ -1766,54 +2260,39 @@ class App {
       console.error('[AFTOGRAF] _openSettings error:', err);
     }
   }
-
   _closeSettings() {
     const overlay = document.getElementById('settings-overlay');
     if (!overlay) return;
-
-    // Применяем изменения адресов переменных
     document.querySelectorAll('.cfg-var-addr').forEach(inp => {
       const key = inp.dataset.key;
       const raw = inp.value.replace(/^\$/, '');
       const addr = parseInt(raw, 16);
       if (!isNaN(addr)) this.settings.setAddr(key, addr);
     });
-
-    // Применяем изменения адресов чипов
     document.querySelectorAll('.cfg-chip-offset').forEach(inp => {
       const idx = parseInt(inp.dataset.idx);
       const raw = inp.value.replace(/^\$/, '');
       const offset = parseInt(raw, 16);
       if (!isNaN(offset)) this.settings.setChipOffset(idx, offset);
     });
-
     this.settings.save();
     overlay.remove();
   }
-
   _bindSettingsEvents() {
     const overlay = document.getElementById('settings-overlay');
     if (!overlay) return;
-
-    // Закрытие
     overlay.querySelector('#settings-close').addEventListener('click', () => this._closeSettings());
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) this._closeSettings();
     });
-    // Escape
     const onKey = (e) => { if (e.key === 'Escape') this._closeSettings(); };
     document.addEventListener('keydown', onKey);
-    // Clean up listener when closed
     const origClose = this._closeSettings.bind(this);
     this._closeSettings = () => { document.removeEventListener('keydown', onKey); origClose(); };
-
-    // Загрузка ROM из настроек
     const loadBtn = overlay.querySelector('#settings-load-rom');
     const fileInput = overlay.querySelector('#settings-rom-input');
     loadBtn.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', (e) => this._handleSettingsROM(e, overlay));
-
-    // Сохранить / Сбросить
     overlay.querySelector('#settings-save').addEventListener('click', () => {
       this._closeSettings();
       this._setLoadStatus('Настройки сохранены', 'ok');
@@ -1824,22 +2303,11 @@ class App {
       this._openSettings();
       this._setLoadStatus('Настройки сброшены', 'ok');
     });
-
-    // Кастомные переменные
     overlay.querySelector('#settings-custom-add').addEventListener('click', () => {
       this.settings.addCustom('var' + (this.settings.config.custom.length + 1), 0x6000);
       overlay.remove();
       this._openSettings();
     });
-    overlay.querySelector('#settings-custom-remove')?.addEventListener('click', (e) => {
-      if (e.target.classList.contains('cfg-custom-remove')) {
-        this.settings.removeCustom(parseInt(e.target.dataset.id));
-        overlay.remove();
-        this._openSettings();
-      }
-    });
-    // Delegate remove clicks on table
-    // Use event delegation for remove buttons
     overlay.querySelector('#custom-vars-table tbody').addEventListener('click', (e) => {
       const btn = e.target.closest('.cfg-custom-remove');
       if (btn) {
@@ -1848,36 +2316,24 @@ class App {
         this._openSettings();
       }
     });
-
-    // Чтение кастомных переменных
     overlay.querySelector('#settings-custom-read').addEventListener('click', () => {
       this._readCustomVars(overlay);
     });
   }
-
   async _handleSettingsROM(event, overlay) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
-
     const addrInput = overlay.querySelector('#settings-load-addr');
     const rawAddr = addrInput.value.replace(/^\$/, '');
     const loadAddr = parseInt(rawAddr, 16) || 0;
     const statusEl = overlay.querySelector('#settings-load-status');
-
     try {
       const buf = await files[0].arrayBuffer();
       const data = new Uint8Array(buf);
       const sizeKB = (data.length / 1024).toFixed(1);
-
-      // Создаём новый MMU
       this.mmu = new MMU(this.ppi1, this.ppi2, this.pit, this.uart);
-
-      // Загружаем по указанному адресу
+      this.mmu.onInvalidWrite = (addr, val) => this._onInvalidWrite(addr, val);
       this.mmu.loadROM(data, loadAddr);
-
-      // Если файл 24KB, загружаем в $0000 (все 3 чипа)
-      // Если файл 8KB — в указанный адрес
-
       this.romLoaded = true;
       this.cpu = new CPU8080(
         (addr) => this.mmu.readByte(addr),
@@ -1889,7 +2345,6 @@ class App {
       this._rebuildDisasm(loadAddr);
       this._updateAll();
       this.els.btnStep.disabled = false;
-
       statusEl.textContent = `✓ Загружено ${sizeKB}KB по адресу $${loadAddr.toString(16).padStart(4,'0').toUpperCase()}`;
       statusEl.style.display = 'block';
       statusEl.className = 'load-status-ok';
@@ -1899,7 +2354,6 @@ class App {
       statusEl.className = 'load-status-error';
     }
   }
-
   _readCustomVars(overlay) {
     const readout = overlay.querySelector('#custom-readout');
     const custom = this.settings.config.custom;
@@ -1907,8 +2361,6 @@ class App {
       readout.innerHTML = '<div style="color:var(--text-dim)">Нет переменных для чтения</div>';
       return;
     }
-
-    // Читаем текущие значения из input'ов (могут быть изменены)
     overlay.querySelectorAll('.cfg-custom-addr').forEach(inp => {
       const id = parseInt(inp.dataset.id);
       const raw = inp.value.replace(/^\$/, '');
@@ -1916,7 +2368,6 @@ class App {
       const c = custom.find(c => c.id === id);
       if (c && !isNaN(addr)) c.addr = addr;
     });
-
     let html = '';
     for (const c of custom) {
       let val;
@@ -1932,35 +2383,28 @@ class App {
     }
     readout.innerHTML = html;
   }
-
-  /** Reset CPU and state. */
   reset() {
     this._resetState();
     this.cpu.reset();
     this.plotter.reset();
     this._updateAll();
   }
-
-  /** Single step. */
   step() {
-    if (!this.romLoaded) return;
-    if (this.cpu.halt) return;
-    this.paused = true;
-    this.running = false;
-
-    const pcBefore = this.cpu.pc;
-    this.cpu.step();
-
-    // Update plotter based on I/O writes
-    this._syncPlotter();
-
-    this._updateAll();
-    if (this.els.asmFollowPc.checked) {
-      this._ensureVisible(this.cpu.pc);
+    try {
+      if (!this.romLoaded) return;
+      if (this.cpu.halt) return;
+      this.paused = true;
+      this.running = false;
+      this.cpu.step();
+      this._syncPlotter();
+      this._updateAll();
+      if (this.els.asmFollowPc && this.els.asmFollowPc.checked) {
+        this._ensureVisible(this.cpu.pc);
+      }
+    } catch (e) {
+      console.error('[AFTOGRAF] step() error:', e);
     }
   }
-
-  /** Continuous run. */
   run() {
     if (!this.romLoaded || this.cpu.halt) return;
     this.running = true;
@@ -1968,15 +2412,11 @@ class App {
     this.els.btnRun.disabled = true;
     this.els.btnPause.disabled = false;
     this.els.btnStep.disabled = true;
-
     const speedIdx = parseInt(this.els.speedSlider.value);
     const speed = this.speedTable[speedIdx];
-
     if (speed === 0) {
-      // Maximum speed — run in chunks via setTimeout
       this._runMax();
     } else {
-      // Timed stepping
       this.runTimer = setInterval(() => {
         if (!this.running || this.cpu.halt) {
           this.pause();
@@ -1988,17 +2428,15 @@ class App {
           const pcBefore = this.cpu.pc;
           this.cpu.step();
           this._syncPlotter();
-          // Check breakpoints
           if (this.breakpoints.has(this.cpu.pc)) {
             this.pause();
             break;
           }
         }
         this._updateAll();
-      }, 33); // ~30 fps
+      }, 33);
     }
   }
-
   _runMax() {
     const BATCH = 5000;
     const tick = () => {
@@ -2022,8 +2460,6 @@ class App {
     };
     requestAnimationFrame(tick);
   }
-
-  /** Pause execution. */
   pause() {
     this.running = false;
     this.paused = true;
@@ -2036,60 +2472,71 @@ class App {
     }
     this._updateAll();
   }
-
-  /** Sync plotter state from I/O registers after execution. */
-  /** Sync plotter state from RAM addresses (PLOTTER_CFG) + PPI writes. */
   _syncPlotter() {
-    // Читаем координаты/перо из RAM (основной источник)
     this.plotter.syncFromMemory();
-    // PPI writes — запасной источник для шаговых двигателей
     this.plotter.updateStepper('x', this.ppi1.portA);
     this.plotter.updateStepper('y', this.ppi1.portB);
     this.plotter.setPen(this.ppi2.portA);
     this.plotter.updatePosition();
   }
-
-  /** Update all UI elements. */
   _updateAll() {
     this._updateRegisters();
     this._updateStatusBar();
     this._updateCurrentInsn();
     this._updateDisasmHighlights();
-    this._updateMemoryDump(parseInt(this.els.memAddr?.value, 16) || 0x6000);
+    this._hlAddr = this.cpu.getHL();
+    const writeAddr = this.mmu.lastWriteAddr;
+    let targetAddr = -1;
+    if (writeAddr >= 0 && writeAddr < 0x10000) targetAddr = writeAddr;
+    else if (this._hlAddr >= 0 && this._hlAddr < 0x10000) targetAddr = this._hlAddr;
+    if (targetAddr >= 0) {
+      this.memScrollAddr = targetAddr & 0xfff0;
+      this.els.memAddr.value = this.memScrollAddr.toString(16).padStart(4,'0').toUpperCase();
+    }
+    this._updateMemoryDump(this.memScrollAddr);
     this._updateIO();
     this._updatePlotterUI();
     this._updateStack();
     this._updatePointers();
     this._renderPlotterCanvas();
+    this._updateUSARTStatus();
   }
-
-  /** Update register display. */
+  _onInvalidWrite(addr, val) {
+    this.pause();
+    const region = addr < 0x6000 ? 'ROM' : addr < 0xe000 ? 'свободная область' : 'зарезервированная';
+    const msg = `⛔ Запись $${val.toString(16).padStart(2,'0').toUpperCase()} в ${region} ($${addr.toString(16).padStart(4,'0').toUpperCase()})`;
+    if (this.els.loadStatus) {
+      this.els.loadStatus.textContent = msg;
+      this.els.loadStatus.className = 'load-status-error';
+      this.els.loadStatus.style.display = 'block';
+    }
+    console.warn('[MMU]', msg);
+  }
   _updateRegisters() {
     const s = this.cpu.getState();
-    this.els.regA.textContent = s.a.toString(16).padStart(2,'0').toUpperCase();
-    this.els.regB.textContent = s.b.toString(16).padStart(2,'0').toUpperCase();
-    this.els.regC.textContent = s.c.toString(16).padStart(2,'0').toUpperCase();
-    this.els.regD.textContent = s.d.toString(16).padStart(2,'0').toUpperCase();
-    this.els.regE.textContent = s.e.toString(16).padStart(2,'0').toUpperCase();
-    this.els.regH.textContent = s.h.toString(16).padStart(2,'0').toUpperCase();
-    this.els.regL.textContent = s.l.toString(16).padStart(2,'0').toUpperCase();
-    this.els.regSP.textContent = s.sp.toString(16).padStart(4,'0').toUpperCase();
-    this.els.regPC.textContent = s.pc.toString(16).padStart(4,'0').toUpperCase();
-    this.els.regF.textContent = s.flags.toString(16).padStart(2,'0').toUpperCase();
-
-    // Flags
+    const setReg = (el, val, len) => {
+      if (el && !el.classList.contains('editing')) {
+        el.textContent = val.toString(16).padStart(len,'0').toUpperCase();
+      }
+    };
+    setReg(this.els.regA, s.a, 2);
+    setReg(this.els.regB, s.b, 2);
+    setReg(this.els.regC, s.c, 2);
+    setReg(this.els.regD, s.d, 2);
+    setReg(this.els.regE, s.e, 2);
+    setReg(this.els.regH, s.h, 2);
+    setReg(this.els.regL, s.l, 2);
+    setReg(this.els.regSP, s.sp, 4);
+    setReg(this.els.regPC, s.pc, 4);
+    setReg(this.els.regF, s.flags, 2);
     this.els.flagS.classList.toggle('active', !!(s.flags & 0x80));
     this.els.flagZ.classList.toggle('active', !!(s.flags & 0x40));
     this.els.flagAC.classList.toggle('active', !!(s.flags & 0x10));
-    this.els.flagP.classList.toggle('active', !!(s.flags & 0x04));
     this.els.flagCY.classList.toggle('active', !!(s.flags & 0x01));
   }
-
-  /** Show current instruction. */
   _updateCurrentInsn() {
     const pc = this.cpu.pc;
-    const insn = disasmInstruction(this.mmu, pc);
-    // Raw bytes
+    const insn = disasmInstruction(this.mmu, pc, this.cpu.optable);
     let bytes = '';
     for (let i = 0; i < insn.size; i++) {
       bytes += this.mmu.peek(pc + i).toString(16).padStart(2,'0').toUpperCase() + ' ';
@@ -2097,41 +2544,71 @@ class App {
     this.els.currentInsn.textContent = insn.mnemonic;
     this.els.currentBytes.textContent = bytes.trim();
   }
-
-  /** Build disassembly listing around given address. */
   _rebuildDisasm(addr) {
-    const NUM_LINES = 256;
+    const NUM_LINES = 512;
     const half = NUM_LINES / 2;
-    const start = Math.max(0, addr - half * 2); // 2 bytes per line avg
-
+    const start = Math.max(0, addr - half * 2);
     this.disasmAddr = start;
     this.disasmCache = [];
     let a = start;
     for (let i = 0; i < NUM_LINES && a < 0x10000; i++) {
-      if (a >= 0x6000 && a < 0xe000) break; // unmapped
-      const insn = disasmInstruction(this.mmu, a);
+      const insn = disasmInstruction(this.mmu, a, this.cpu.optable);
+      if (i < 4) console.log(`[DASM] $${a.toString(16).padStart(4,'0')} → '${insn.mnemonic}'`);
       this.disasmCache.push(insn);
       a += insn.size;
     }
+    this._asmFirstAddr = this.disasmCache.length > 0 ? this.disasmCache[0].addr : 0;
+    this._asmLastAddr = this.disasmCache.length > 0 ? this.disasmCache[this.disasmCache.length-1].addr : 0;
     this._renderDisasm();
   }
-
+  _appendDisasm() {
+    if (!this.disasmCache.length) return;
+    const last = this.disasmCache[this.disasmCache.length - 1];
+    let a = last.addr + last.size;
+    const before = this.disasmCache.length;
+    for (let i = 0; i < 200 && a < 0x10000; i++) {
+      const insn = disasmInstruction(this.mmu, a, this.cpu.optable);
+      this.disasmCache.push(insn);
+      a += insn.size;
+    }
+    this._asmLastAddr = this.disasmCache[this.disasmCache.length - 1].addr;
+    this._renderDisasm(before);
+  }
+  _prependDisasm() {
+    if (!this.disasmCache.length) return;
+    const firstAddr = this.disasmCache[0].addr;
+    let a = Math.max(0, firstAddr - 200);
+    const newInsns = [];
+    for (let i = 0; i < 200 && a < firstAddr && a < 0x10000; i++) {
+      const insn = disasmInstruction(this.mmu, a, this.cpu.optable);
+      if (insn.addr + insn.size <= firstAddr) {
+        newInsns.push(insn);
+      }
+      if (insn.addr + insn.size > firstAddr) break;
+      a += insn.size;
+    }
+    if (newInsns.length > 0) {
+      const scrollTarget = this.disasmCache[0].addr;
+      const removeCount = Math.min(newInsns.length, Math.floor(this.disasmCache.length * 0.3));
+      this.disasmCache.splice(this.disasmCache.length - removeCount, removeCount);
+      this.disasmCache.unshift(...newInsns);
+      this._asmFirstAddr = this.disasmCache[0].addr;
+      this._asmLastAddr = this.disasmCache[this.disasmCache.length - 1].addr;
+      this._renderDisasm();
+    }
+  }
   _renderDisasm() {
     const list = this.els.asmList;
     list.innerHTML = '';
     const pc = this.cpu.pc;
-
     for (const insn of this.disasmCache) {
       const line = document.createElement('div');
       line.className = 'asm-line';
       if (this.breakpoints.has(insn.addr)) line.classList.add('bp-set');
       if (insn.addr === pc) line.classList.add('current');
-
       const bp = this.breakpoints.has(insn.addr) ? '●' : ' ';
       const mnem = insn.mnemonic.split(' ')[0];
       const oper = insn.mnemonic.includes(' ') ? insn.mnemonic.slice(insn.mnemonic.indexOf(' ')+1) : '';
-
-      // Аннотация: адрес перехода для JMP/CALL
       let annot = '';
       if (['JMP','CALL','JNZ','JZ','JNC','JC','JPO','JPE','JP','JM','CNZ','CZ','CNC','CC','CPO','CPE','CP','CM'].includes(mnem)) {
         const addr = parseInt(oper.replace(/^0x/i,''), 16);
@@ -2150,7 +2627,6 @@ class App {
         const name = PORT_NAMES[0xe000 | port] || '';
         if (name) annot = `; ${name}`;
       }
-
       line.innerHTML = `
         <span class="asm-bp">${bp}</span>
         <span class="asm-addr">${insn.addr.toString(16).padStart(4,'0').toUpperCase()}</span>
@@ -2159,7 +2635,14 @@ class App {
         <span class="asm-operands">${oper}</span>
         <span class="asm-annot">${annot}</span>
       `;
-
+      // Hover tracking for J-key jump
+      line.addEventListener('mouseenter', () => {
+        this._asmHoverAddr = insn.addr;
+        line.classList.add('asm-hover');
+      });
+      line.addEventListener('mouseleave', () => {
+        line.classList.remove('asm-hover');
+      });
       line.addEventListener('click', () => {
         if (this.breakpoints.has(insn.addr)) {
           this.breakpoints.delete(insn.addr);
@@ -2168,11 +2651,16 @@ class App {
         }
         this._renderDisasm();
       });
-
+      // Double-click — jump PC to this address
+      line.addEventListener('dblclick', () => {
+        this._asmHoverAddr = insn.addr;
+        this.cpu.pc = insn.addr;
+        this._updateAll();
+        if (this.els.asmFollowPc.checked) this._ensureVisible(this.cpu.pc);
+      });
       list.appendChild(line);
     }
   }
-
   _formatRawBytes(insn) {
     let s = '';
     for (let i = 0; i < insn.size; i++) {
@@ -2180,9 +2668,7 @@ class App {
     }
     return s.padEnd(9);
   }
-
   _updateDisasmHighlights() {
-    // Re-render to highlight current line
     const pc = this.cpu.pc;
     const lines = this.els.asmList.querySelectorAll('.asm-line');
     let idx = 0;
@@ -2193,8 +2679,22 @@ class App {
     }
   }
 
+  _copyDisasmRange() {
+    let text = '';
+    for (const insn of this.disasmCache) {
+      const bytes = [];
+      for (let i = 0; i < insn.size; i++) bytes.push(this.mmu.peek(insn.addr + i).toString(16).padStart(2,'0').toUpperCase());
+      text += `${insn.addr.toString(16).padStart(4,'0').toUpperCase()} ${bytes.join(' ').padEnd(9)} ${insn.mnemonic}\n`;
+    }
+    navigator.clipboard.writeText(text).catch(() => {});
+    if (this.els.loadStatus) {
+      this.els.loadStatus.textContent = `📋 Скопировано ${this.disasmCache.length} строк`;
+      this.els.loadStatus.className = 'load-status-info';
+      this.els.loadStatus.style.display = 'block';
+      setTimeout(() => { if (this.els.loadStatus) this.els.loadStatus.style.display = 'none'; }, 2000);
+    }
+  }
   _ensureVisible(addr) {
-    // Check if addr is in current cache range
     const first = this.disasmCache[0];
     const last = this.disasmCache[this.disasmCache.length - 1];
     if (!first || !last) return;
@@ -2202,7 +2702,6 @@ class App {
       this._rebuildDisasm(addr);
       return;
     }
-    // Scroll to the line
     const lines = this.els.asmList.querySelectorAll('.asm-line');
     for (let i = 0; i < this.disasmCache.length && i < lines.length; i++) {
       if (this.disasmCache[i].addr === addr) {
@@ -2211,38 +2710,171 @@ class App {
       }
     }
   }
-
-  /** Memory dump at given address. */
-  _updateMemoryDump(addr) {
-    const dump = this.els.memDump;
-    dump.innerHTML = '';
-    const start = addr & 0xfff0;
-    const rows = 16;
-
-    for (let r = 0; r < rows; r++) {
-      const base = start + r * 16;
-      const line = document.createElement('div');
-      line.className = 'mem-line';
-      let addrStr = base.toString(16).padStart(4,'0').toUpperCase();
-      let hex = '';
-      let ascii = '';
-
-      for (let c = 0; c < 16; c++) {
-        const byteVal = this.mmu.peek(base + c);
-        hex += byteVal.toString(16).padStart(2,'0').toUpperCase() + ' ';
-        ascii += (byteVal >= 0x20 && byteVal <= 0x7e) ? String.fromCharCode(byteVal) : '.';
-      }
-
-      line.innerHTML = `
-        <span class="mem-addr">${addrStr}</span>
-        <span class="mem-hex">${hex}</span>
-        <span class="mem-ascii">${ascii}</span>
-      `;
-      dump.appendChild(line);
+  /* ═══════════════════════════════════════════════════════════════
+   * Memory Dump — scrollable through all 64KB, editable bytes
+   */
+  _onMemScroll() {
+    if (this._memUpdating) return;
+    const container = this.els.memContainer;
+    if (!container) return;
+    const scrollTop = container.scrollTop;
+    const lineHeight = 17;
+    const rowIndex = Math.floor(scrollTop / lineHeight);
+    const newAddr = rowIndex * 16;
+    if (newAddr !== this.memScrollAddr && newAddr >= 0 && newAddr <= 0xfff0) {
+      this.memScrollAddr = newAddr;
+      this.els.memAddr.value = newAddr.toString(16).padStart(4,'0').toUpperCase();
+      this._updateMemoryDump(newAddr);
     }
   }
-
-  /** I/O device state panel. */
+  _updateMemoryDump(addr) {
+    const dump = this.els.memDump;
+    const container = this.els.memContainer;
+    if (!dump || !container) return;
+    // Guard: prevent recursion when we set scrollTop programmatically
+    if (this._memUpdating) return;
+    this._memUpdating = true;
+    this.memScrollAddr = addr & 0xfff0;
+    // Set virtual scroll height FIRST, then scroll position
+    const totalRows = 0x10000 / 16; // 4096 rows
+    const lineHeight = 17;
+    container.style.height = (totalRows * lineHeight) + 'px';
+    container.style.position = 'relative';
+    // Now scroll to the new address (center it in view)
+    const targetRow = this.memScrollAddr / 16;
+    const visRows = Math.ceil((container.clientHeight || 300) / 17);
+    container.scrollTop = Math.max(0, (targetRow - visRows / 2) * 17);
+    // Render visible rows
+    const scrollTop = container.scrollTop || 0;
+    const visibleHeight = container.clientHeight || 300;
+    const firstRow = Math.max(0, Math.floor(scrollTop / lineHeight) - 2);
+    const lastRow = Math.min(totalRows - 1, Math.ceil((scrollTop + visibleHeight) / lineHeight) + 2);
+    dump.style.position = 'absolute';
+    dump.style.top = (firstRow * lineHeight) + 'px';
+    dump.innerHTML = '';
+    dump.style.width = '100%';
+    const regBase = 0xe000;
+    const ramStart = 0x6000;
+    const ramEnd = 0x63ff;
+    for (let r = firstRow; r <= lastRow; r++) {
+      const base = r * 16;
+      const line = document.createElement('div');
+      line.className = 'mem-line';
+      if (base >= ramStart && base <= ramEnd) line.classList.add('watch');
+      let addrStr = base.toString(16).padStart(4,'0').toUpperCase();
+      const hexSpan = document.createElement('span');
+      hexSpan.className = 'mem-hex';
+      for (let c = 0; c < 16; c++) {
+        const byteAddr = base + c;
+        const byteVal = this.mmu.peek(byteAddr);
+        const byteSpan = document.createElement('span');
+        byteSpan.className = 'mem-byte';
+        byteSpan.textContent = byteVal.toString(16).padStart(2,'0').toUpperCase();
+        byteSpan.dataset.addr = byteAddr;
+        byteSpan.dataset.val = byteVal;
+        // Color by region
+        if (byteAddr >= 0xe000) {
+          byteSpan.style.color = 'var(--purple)';
+        } else if (byteAddr >= ramStart && byteAddr <= ramEnd) {
+          byteSpan.style.color = 'var(--yellow)';
+        } else if (byteAddr < 0x6000) {
+          byteSpan.style.color = 'var(--text-dim)';
+        }
+        // Highlight if this is the HL pointer address
+        if (byteAddr === this._hlAddr) {
+          byteSpan.style.background = 'rgba(255,158,100,0.4)';
+          byteSpan.style.outline = '1px solid var(--orange)';
+        }
+        // Click to edit
+        byteSpan.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._editMemoryByte(byteSpan);
+        });
+        hexSpan.appendChild(byteSpan);
+        // Spacer
+        if (c === 7) {
+          hexSpan.appendChild(document.createTextNode(' '));
+        }
+      }
+      // ASCII
+      let ascii = '';
+      for (let c = 0; c < 16; c++) {
+        const bv = this.mmu.peek(base + c);
+        ascii += (bv >= 0x20 && bv <= 0x7e) ? String.fromCharCode(bv) : '.';
+      }
+      const asciiSpan = document.createElement('span');
+      asciiSpan.className = 'mem-ascii';
+      asciiSpan.textContent = ascii;
+      line.innerHTML = `<span class="mem-addr">${addrStr}</span>`;
+      line.appendChild(hexSpan);
+      line.appendChild(asciiSpan);
+      dump.appendChild(line);
+    }
+    this._memUpdating = false;
+  }
+  _editMemoryByte(byteSpan) {
+    if (byteSpan.classList.contains('editing')) return;
+    if (this.editingByte) {
+      // Commit any pending edit
+      this._commitByteEdit();
+    }
+    const addr = parseInt(byteSpan.dataset.addr);
+    const curVal = parseInt(byteSpan.dataset.val);
+    byteSpan.classList.add('editing');
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'mem-byte-inp';
+    inp.value = curVal.toString(16).padStart(2,'0').toUpperCase();
+    inp.maxLength = 2;
+    byteSpan.textContent = '';
+    byteSpan.appendChild(inp);
+    inp.focus();
+    inp.select();
+    this.editingByte = { addr, element: byteSpan, input: inp, original: curVal };
+    const finish = (commit) => {
+      if (!this.editingByte || this.editingByte.element !== byteSpan) return;
+      let newVal = this.editingByte.original;
+      if (commit) {
+        const raw = inp.value.trim().toLowerCase();
+        const parsed = parseInt(raw, 16);
+        if (!isNaN(parsed) && parsed >= 0 && parsed <= 0xff) {
+          newVal = parsed;
+        }
+      }
+      if (newVal !== this.editingByte.original) {
+        this.mmu.poke(addr, newVal);
+      }
+      // Re-render just this byte
+      byteSpan.classList.remove('editing');
+      byteSpan.textContent = newVal.toString(16).padStart(2,'0').toUpperCase();
+      byteSpan.dataset.val = newVal;
+      this.editingByte = null;
+      // Update annotations that depend on memory
+      this._updateDisasmHighlights();
+    };
+    inp.addEventListener('blur', () => finish(true));
+    inp.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { finish(true); }
+      else if (ev.key === 'Escape') { finish(false); }
+      else if (ev.key === 'Tab') {
+        ev.preventDefault();
+        finish(true);
+        // Find next byte
+        const next = byteSpan.nextElementSibling;
+        if (next && next.classList.contains('mem-byte')) {
+          this._editMemoryByte(next);
+        }
+      }
+    });
+  }
+  _commitByteEdit() {
+    if (!this.editingByte) return;
+    const inp = this.editingByte.input;
+    if (inp) inp.blur();
+  }
+  /* ═══════════════════════════════════════════════════════════════
+   * I/O panel
+   * ═══════════════════════════════════════════════════════════════ */
   _updateIO() {
     const panel = this.els.ioPanel;
     panel.innerHTML = `
@@ -2265,14 +2897,13 @@ class App {
         <div><span class="io-reg">C: <span class="io-reg-val">${this.ppi2.portC.toString(16).padStart(2,'0').toUpperCase()}</span></span></div>
       </div>
       <div class="io-block">
-        <div class="io-name">USART</div>
+        <div class="io-name">USART (с терминалом)</div>
         <div><span class="io-reg">DATA: <span class="io-reg-val">${this.uart.data.toString(16).padStart(2,'0').toUpperCase()}</span></span></div>
         <div><span class="io-reg">STATUS: <span class="io-reg-val">${this.uart.status.toString(16).padStart(2,'0').toUpperCase()}</span></span></div>
+        <div><span class="io-reg">RX буфер: <span class="io-reg-val">${this.uart.rxBuffer.length} байт</span></span></div>
       </div>
     `;
   }
-
-  /** Update plotter position info. */
   _updatePlotterUI() {
     const set = (el, val) => { if (el) el.textContent = val; };
     set(this.els.plotterPos, `X: ${this.plotter.xPos} Y: ${this.plotter.yPos}`);
@@ -2281,30 +2912,39 @@ class App {
     const c = PEN_COLORS[this.plotter.penNum] || PEN_COLORS[0];
     set(this.els.plotterColor, c.name);
     if (this.els.plotterColor) this.els.plotterColor.style.color = c.stroke;
+    // HPGL progress
+    if (this.hpglTotal > 0) {
+      set(this.els.hpglProgress, `HPGL: ${this.hpglCurrent}/${this.hpglTotal}`);
+      set(this.els.hpglCmd, this.hpglCmdText);
+    } else {
+      set(this.els.hpglProgress, '');
+      set(this.els.hpglCmd, '');
+    }
   }
-
-  /** Stack view — последние 8 слов. */
+  /* ═══════════════════════════════════════════════════════════════
+   * Stack — 50 words (100 bytes), scrollable
+   * ═══════════════════════════════════════════════════════════════ */
   _updateStack() {
     const el = this.els.stackDisplay;
     if (!el) return;
     const sp = this.cpu.sp;
+    const depth = 50; // 50 words
     let html = '';
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < depth; i++) {
       const addr = (sp + i * 2) & 0xffff;
       const lo = this.mmu.peek(addr);
       const hi = this.mmu.peek(addr + 1);
       const val = (hi << 8) | lo;
-      const marker = i === 0 ? '→ SP' : '    ';
-      html += `<div style="display:flex;gap:8px;font:11px monospace">
-        <span style="color:var(--text-dim);min-width:40px">${marker}</span>
+      const marker = i === 0 ? '→SP' : '   ';
+      const cls = i === 0 ? 'stack-sp' : '';
+      html += `<div>
+        <span style="color:var(--text-dim);min-width:28px">${marker}</span>
         <span style="color:var(--hl);width:48px">$${addr.toString(16).padStart(4,'0').toUpperCase()}</span>
-        <span>$${val.toString(16).padStart(4,'0').toUpperCase()}</span>
+        <span class="${cls}">$${val.toString(16).padStart(4,'0').toUpperCase()}</span>
       </div>`;
     }
     el.innerHTML = html;
   }
-
-  /** Pointer preview — HL, DE, BC + SP, PC. */
   _updatePointers() {
     const el = this.els.pointersDisplay;
     if (!el) return;
@@ -2337,41 +2977,50 @@ class App {
     </div>`;
     el.innerHTML = html;
   }
-
-  /** Draw accumulated plotter lines onto canvas. */
-  _renderPlotterCanvas() {
+  _renderPlotterCanvas(autofit) {
     const canvas = this.els.plotterCanvas;
     const ctx = canvas.getContext('2d');
     const w = canvas.width, h = canvas.height;
-
     ctx.fillStyle = '#f5f0e8';
     ctx.fillRect(0, 0, w, h);
-
-    if (this.plotter.lines.length === 0) {
+    // Collect all points for scaling
+    const allSegments = [...this.plotter.lines];
+    if (this.plotter.currentSegment) allSegments.push(this.plotter.currentSegment);
+    if (allSegments.length === 0) {
+      // No data yet — show placeholder and cursor if moving
       ctx.fillStyle = '#b8b0a0';
       ctx.textAlign = 'center';
+      ctx.font = '14px sans-serif';
       ctx.fillText('Ожидание команд плоттера…', w / 2, h / 2);
+      // Draw cursor at current position even before any lines
+      if (this.plotter.xPos !== 0 || this.plotter.yPos !== 0) {
+        const cx = w / 2 + this.plotter.xPos % w;
+        const cy = h / 2 - this.plotter.yPos % h;
+        ctx.beginPath();
+        ctx.arc(Math.min(w-10, Math.max(10, cx)), Math.min(h-10, Math.max(10, cy)), 5, 0, Math.PI * 2);
+        ctx.fillStyle = this.plotter.penDown ? '#cc0000' : '#3366cc';
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
       return;
     }
-
-    // Scale and center
+    // Scale from all segment bounds
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const seg of this.plotter.lines) {
-      minX = Math.min(minX, seg.x1, seg.x2);
-      maxX = Math.max(maxX, seg.x1, seg.x2);
-      minY = Math.min(minY, seg.y1, seg.y2);
-      maxY = Math.max(maxY, seg.y1, seg.y2);
+    for (const seg of allSegments) {
+      if (seg.x1 < minX) minX = seg.x1; if (seg.x1 > maxX) maxX = seg.x1;
+      if (seg.x2 < minX) minX = seg.x2; if (seg.x2 > maxX) maxX = seg.x2;
+      if (seg.y1 < minY) minY = seg.y1; if (seg.y1 > maxY) maxY = seg.y1;
+      if (seg.y2 < minY) minY = seg.y2; if (seg.y2 > maxY) maxY = seg.y2;
     }
-
     const rangeX = maxX - minX || 1;
     const rangeY = maxY - minY || 1;
     const margin = 30;
     const scale = Math.min((w - 2*margin) / rangeX, (h - 2*margin) / rangeY);
-
     const sx = (x) => margin + (x - minX) * scale;
     const sy = (y) => h - margin - (y - minY) * scale;
-
-    // Draw grid
+    // Grid
     ctx.strokeStyle = '#d8d0c0';
     ctx.lineWidth = 0.5;
     for (let g = 0; g < 10; g++) {
@@ -2380,12 +3029,10 @@ class App {
       ctx.beginPath(); ctx.moveTo(x, margin); ctx.lineTo(x, h - margin); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(margin, y); ctx.lineTo(w - margin, y); ctx.stroke();
     }
-
-    // Draw lines
+    // Draw finalized lines
     ctx.lineWidth = 2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-
     for (const seg of this.plotter.lines) {
       const c = PEN_COLORS[seg.pen] || PEN_COLORS[0];
       ctx.strokeStyle = c.stroke;
@@ -2394,8 +3041,19 @@ class App {
       ctx.lineTo(sx(seg.x2), sy(seg.y2));
       ctx.stroke();
     }
-
-    // Текущая позиция
+    // Draw current segment (in progress) — dashed
+    if (this.plotter.currentSegment) {
+      const c = PEN_COLORS[this.plotter.currentSegment.pen] || PEN_COLORS[0];
+      ctx.strokeStyle = c.stroke;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(sx(this.plotter.currentSegment.x1), sy(this.plotter.currentSegment.y1));
+      ctx.lineTo(sx(this.plotter.currentSegment.x2), sy(this.plotter.currentSegment.y2));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // Current position marker
     const cx = sx(this.plotter.xPos);
     const cy = sy(this.plotter.yPos);
     ctx.beginPath();
@@ -2406,116 +3064,316 @@ class App {
     ctx.lineWidth = 1.5;
     ctx.stroke();
   }
-}
 
+
+  /* ═══════════════════════════════════════════════════════════════
+   * HPGL File Loader
+   * ═══════════════════════════════════════════════════════════════ */
+
+  _loadHPGL(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const cmds = text.split(';').map(s => s.trim()).filter(s => s.length > 0);
+        // Reset plotter
+        this.plotter.reset();
+        this.plotter.clearLines();
+        let penDown = false;
+        let penNum = 0;
+        let x = 0, y = 0;
+        // HPGL units → plotter coordinate scale
+        // Find bounds for auto-scaling
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        const coords = [];
+        for (const cmd of cmds) {
+          const m = cmd.match(/^([A-Z]{2,3})\s*(.*)$/);
+          if (!m) continue;
+          const op = m[1];
+          const args = m[2].trim();
+          if (op === 'PU' || op === 'PD') {
+            const nums = args.split(/[\s,]+/).filter(s => s.length > 0).map(Number);
+            for (let i = 0; i + 1 < nums.length; i += 2) {
+              const cx = nums[i], cy = nums[i+1];
+              coords.push({ x: cx, y: cy, cmd: op, pen: penNum });
+              if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
+              if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+            }
+          } else if (op === 'SP') {
+            penNum = Math.min(6, Math.max(0, parseInt(args) - 1));
+          }
+          // IN — handled via initial reset above
+        }
+        const rangeX = maxX - minX || 1;
+        const rangeY = maxY - minY || 1;
+        const scale = 1000 / Math.max(rangeX, rangeY);
+        const ox = 100, oy = 100; // offset to center on plotter
+        const hpglAddr = (name) => this.settings.getAddr(name);
+        // Init HPGL display state
+        this.hpglTotal = coords.length;
+        this.hpglCurrent = 0;
+        // Check mode
+        const uartMode = this.els.hpglUartMode?.checked;
+        if (uartMode) {
+          // UART mode: send HPGL as raw text to USART, CPU runs firmware
+          this._logToUSART(`\n📐 HPGL UART: ${file.name} (${text.length} chars)\n`, 'var(--yellow)');
+          // Send HPGL text character by character to USART
+          let charIdx = 0;
+          const uartInterval = setInterval(() => {
+            if (charIdx >= text.length) {
+              clearInterval(uartInterval);
+              this._logToUSART(`\n✓ HPGL UART done\n`, 'var(--green)');
+              if (this.els.hpglStatus) {
+                this.els.hpglStatus.textContent = `✓ ${file.name} (UART)`;
+                this.els.hpglStatus.style.color = 'var(--green)';
+              }
+              return;
+            }
+            const ch = text.charCodeAt(charIdx);
+            this.uart.receiveByte(ch);
+            charIdx++;
+            if (charIdx % 200 === 0) {
+              this._updatePlotterUI();
+              this._renderPlotterCanvas();
+            }
+          }, 2);
+          return; // skip direct drawing below
+        }
+        // Animate drawing
+        if (this.els.hpglStatus) {
+          this.els.hpglStatus.textContent = `▶ ${file.name} (${coords.length} coords)`;
+          this.els.hpglStatus.style.color = 'var(--cyan)';
+        }
+        // Force an initial canvas render to show the cleared state
+        this._renderPlotterCanvas();
+        console.log('[HPGL] direct draw start — coords=' + coords.length);
+        // Show pause button
+        if (this.els.hpglPause) {
+          this.els.hpglPause.style.display = 'inline-block';
+          this.els.hpglPause.textContent = '\u23F8';
+        }
+        let idx = 0;
+        const interval = setInterval(() => {
+          try {
+            if (idx >= coords.length) {
+              clearInterval(interval);
+              this._renderPlotterCanvas(true);
+              return;
+            }
+            // Pause check
+            if (this._hpglPaused) {
+              // Skip rendering, just wait
+              return;
+            }
+            const pt = coords[idx];
+            const sx = Math.round(pt.x * scale + ox);
+            const sy = Math.round(pt.y * scale + oy);
+            this.plotter.xPos = sx;
+            this.plotter.yPos = sy;
+            this.plotter.x = sx;
+            this.plotter.y = sy;
+            if (pt.cmd === 'PD') {
+              this.plotter.penDown = true;
+              if (this.plotter.currentSegment) {
+                this.plotter.currentSegment.x2 = sx;
+                this.plotter.currentSegment.y2 = sy;
+              } else {
+                const prev = idx > 0 ? coords[idx-1] : pt;
+                const px = Math.round(prev.x * scale + ox);
+                const py = Math.round(prev.y * scale + oy);
+                this.plotter.currentSegment = { x1: px, y1: py, pen: pt.pen };
+                this.plotter.currentSegment.x2 = sx;
+                this.plotter.currentSegment.y2 = sy;
+              }
+            } else {
+              this.plotter.penDown = false;
+              if (this.plotter.currentSegment) {
+                this.plotter.lines.push(this.plotter.currentSegment);
+                this.plotter.currentSegment = null;
+              }
+            }
+            this.mmu.poke(hpglAddr('X_POS_LO'), sx & 0xff);
+            this.mmu.poke(hpglAddr('X_POS_HI'), (sx >> 8) & 0xff);
+            this.mmu.poke(hpglAddr('Y_POS_LO'), sy & 0xff);
+            this.mmu.poke(hpglAddr('Y_POS_HI'), (sy >> 8) & 0xff);
+            this.mmu.poke(hpglAddr('PEN_STATE'), pt.cmd === 'PD' ? 0x01 : 0x00);
+            this.mmu.poke(hpglAddr('PEN_COLOR'), pt.pen);
+            if (pt.cmd === 'PD' && this.plotter.currentSegment) {
+              const next = coords[idx + 1];
+              if (!next || next.cmd === 'PU') {
+                this.plotter.lines.push(this.plotter.currentSegment);
+                this.plotter.currentSegment = null;
+              }
+            }
+            // Batch renders for performance
+            const doRender = (idx % 16 === 0) || (idx === coords.length - 1) || idx < 4;
+            if (doRender) {
+              this._renderPlotterCanvas();
+              this.hpglCurrent = idx + 1;
+              const rawCmd = idx < this.hpglCmds.length ? this.hpglCmds[idx] : '';
+              this.hpglCmdText = rawCmd;
+              this._updatePlotterUI();
+            }
+            idx++;
+          } catch (e) {
+            clearInterval(interval);
+            if (this.els.hpglStatus) {
+              this.els.hpglStatus.textContent = `✕ ${e.message}`;
+              this.els.hpglStatus.style.color = 'var(--red)';
+            }
+            console.error('[AFTOGRAF] HPGL error at idx=' + idx + ':', e);
+          }
+        }, 5);
+      } catch (err) {
+        if (this.els.hpglStatus) {
+          this.els.hpglStatus.textContent = `✕ ${err.message}`;
+          this.els.hpglStatus.style.color = 'var(--red)';
+        }
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  }
+
+  _saveSession() {
+    const s = this.cpu.getState();
+    // Capture RAM content ($6000-$63FF)
+    const ram = new Uint8Array(0x0400);
+    for (let i = 0; i < 0x0400; i++) ram[i] = this.mmu.peek(0x6000 + i);
+    // Capture plotter lines
+    const lines = this.plotter.lines.map(l => ({ ...l }));
+    const session = {
+      version: 1,
+      date: new Date().toISOString().replace(/T/, ' ').replace(/\.\d+Z/, ''),
+      cpu: {
+        a: s.a, b: s.b, c: s.c, d: s.d, e: s.e, h: s.h, l: s.l,
+        flags: s.flags, sp: s.sp, pc: s.pc, cycles: s.cycles, halt: s.halt,
+      },
+      ram: Array.from(ram),
+      breakpoints: Array.from(this.breakpoints),
+      plotter: {
+        xPos: this.plotter.xPos, yPos: this.plotter.yPos,
+        penDown: this.plotter.penDown, penNum: this.plotter.penNum,
+        lines,
+      },
+    };
+    const json = JSON.stringify(session, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `aftograf-${session.date.replace(/[: ]/g,'-')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    this._setLoadStatus(`Сессия сохранена: ${a.download}`, 'ok');
+  }
+
+  _loadSession(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const session = JSON.parse(e.target.result);
+        if (!session || !session.cpu) {
+          this._setLoadStatus('✕ Неверный формат сессии', 'error');
+          return;
+        }
+        // Restore CPU
+        const c = session.cpu;
+        this.cpu.a = c.a; this.cpu.b = c.b; this.cpu.c = c.c;
+        this.cpu.d = c.d; this.cpu.e = c.e; this.cpu.h = c.h; this.cpu.l = c.l;
+        this.cpu.flags = c.flags; this.cpu.sp = c.sp; this.cpu.pc = c.pc;
+        this.cpu.cycles = c.cycles; this.cpu.halt = c.halt;
+        this.cpu.ie = false;
+        // Restore RAM
+        if (session.ram && session.ram.length === 0x0400) {
+          for (let i = 0; i < 0x0400; i++) this.mmu.poke(0x6000 + i, session.ram[i]);
+        }
+        // Restore breakpoints
+        this.breakpoints = new Set(session.breakpoints || []);
+        // Restore plotter
+        if (session.plotter) {
+          const p = session.plotter;
+          this.plotter.xPos = p.xPos; this.plotter.yPos = p.yPos;
+          this.plotter.penDown = p.penDown; this.plotter.penNum = p.penNum;
+          this.plotter.lines = (p.lines || []).map(l => ({ ...l }));
+          this.plotter.currentSegment = null;
+          this.plotter.x = p.xPos; this.plotter.y = p.yPos;
+          this.plotter.lastMemPenState = -1;
+          this.plotter.lastMemX = -1; this.plotter.lastMemY = -1;
+          this.plotter.lastMemColor = -1;
+          this.plotter.lastXPhase = 0; this.plotter.lastYPhase = 0;
+        }
+        this._updateAll();
+        this._renderPlotterCanvas();
+        this._resetState();
+        this._setLoadStatus(`✓ Загружена сессия от ${session.date}`, 'ok');
+      } catch (err) {
+        this._setLoadStatus(`✕ Ошибка загрузки: ${err.message}`, 'error');
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  }
+}
 /* ═══════════════════════════════════════════════════════════════
  * Startup
  * ═══════════════════════════════════════════════════════════════ */
-
-// Глобальный обработчик ошибок — в консоль + на страницу
 window.addEventListener('error', (e) => {
-  console.error('[AFTOGRAF] Uncaught:', e.error || e.message);
-  const statusEl = document.getElementById('load-status');
-  if (statusEl) {
-    statusEl.textContent = '⛔ JS Error: ' + (e.error?.message || e.message);
-    statusEl.style.display = 'block';
-    statusEl.className = 'load-status-error';
-  }
+  console.error('[AFTOGRAF] Error:', e.error || e.message);
 });
-
 window.addEventListener('unhandledrejection', (e) => {
   console.error('[AFTOGRAF] Unhandled Promise:', e.reason);
 });
-
 console.log('[AFTOGRAF] Starting App...');
 const app = new App();
 console.log('[AFTOGRAF] App initialized');
-
 // Auto-load ROMs from server if served
 async function tryAutoLoadROMs() {
-  console.log('[AFTOGRAF] Auto-load: trying firmware.bin...');
-
-  // Шаг 1: пробуем единый firmware.bin
-  try {
-    const resp = await fetch('./firmware.bin?_=' + Date.now());
-    console.log('[AFTOGRAF] firmware.bin fetch:', resp.status, resp.statusText);
-    if (resp.ok) {
-      const buf = await resp.arrayBuffer();
-      const data = new Uint8Array(buf);
-      console.log('[AFTOGRAF] firmware.bin loaded:', data.length, 'bytes');
-      app.mmu = new MMU(app.ppi1, app.ppi2, app.pit, app.uart);
-      app.mmu.loadROM(data, 0x0000);
-      app.romLoaded = true;
-      app.cpu = new CPU8080(
-        (addr) => app.mmu.readByte(addr),
-        (addr, val) => app.mmu.writeByte(addr, val)
-      );
-      app.plotter.reset();
-      app._resetState();
-      app._rebuildDisasm(0);
-      app._updateMemoryDump(0x6000);
-      app._updateIO();
-      app._updatePlotterUI();
-      app.els.btnStep.disabled = false;
-      app._setLoadStatus('✓ ROM автозагружена (firmware.bin, ' + (data.length/1024).toFixed(0) + 'KB)', 'ok');
-      console.log('[AFTOGRAF] Auto-load SUCCESS');
-      return;
-    } else {
-      console.warn('[AFTOGRAF] firmware.bin fetch failed:', resp.status);
-    }
-  } catch (err) {
-    console.error('[AFTOGRAF] firmware.bin error:', err);
-  }
-
-  console.log('[AFTOGRAF] Auto-load: trying individual chip files...');
-  // Шаг 2: пробуем три отдельных чипа (старый формат)
-  const candidates = [
-    'Autograf-882-CPU_Board-On_Top-Small-Chip01-FromLeft-D2764A-NearOfHeatsink.bin',
-    'Autograf-882-CPU_Board-On_Top-Small-Chip02-FromLeft-D2764A-InMiddle.bin',
-    'Autograf-882-CPU_Board-On_Top-Small-Chip03-FromLeft-D2764A-FarOfHeatsink.bin',
-  ];
-  const encode = (s) => s.replace(/ /g, '%20');
-
-  const buffers = [];
-  for (const path of candidates) {
+  const urls = ['firmware.bin'];
+  for (const url of urls) {
     try {
-      const url = encode(path) + '?_=' + Date.now();
-      const resp = await fetch(url);
-      console.log('[AFTOGRAF] Fetch', path.slice(0, 40) + '...', resp.status);
-      if (resp.ok) {
-        const buf = await resp.arrayBuffer();
-        buffers.push(new Uint8Array(buf));
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.log('[AFTOGRAF] Firmware not found:', url, res.status);
+        continue;
       }
-    } catch (err) {
-      console.warn('[AFTOGRAF] Fetch error:', path.slice(0, 40), err.message);
+      const buf = await res.arrayBuffer();
+      const data = new Uint8Array(buf);
+      console.log('[AFTOGRAF] Loaded', url, '—', data.length, 'bytes');
+      if (data.length === 0x6000) {
+        app.mmu.loadROM(data, 0x0000);
+        app.romLoaded = true;
+        app.cpu = new CPU8080(
+          (addr) => app.mmu.readByte(addr),
+          (addr, val) => app.mmu.writeByte(addr, val)
+        );
+        app.breakpoints.clear();
+        app._resetState();
+        console.log('[AFTOGRAF] ROM[0..7] =',
+          Array.from({length:8}, (_,i) => app.mmu.peek(i).toString(16).padStart(2,'0')).join(' '));
+        app._rebuildDisasm(0);
+        app._updateAll();
+        // Log first cache entry
+        if (app.disasmCache.length > 0) {
+          console.log('[DASM] cache[0] addr=$' + app.disasmCache[0].addr.toString(16) + ' mnem="' + app.disasmCache[0].mnemonic + '"');
+        }
+        app._setLoadStatus(`Авто-загрузка: firmware.bin (${(data.length/1024).toFixed(0)}KB)`, 'ok');
+        return;
+      } else {
+        console.log('[AFTOGRAF] Unexpected firmware size:', data.length);
+      }
+    } catch (e) {
+      console.log('[AFTOGRAF] Fetch failed:', url, e.message);
     }
   }
-
-  if (buffers.length > 0) {
-    console.log('[AFTOGRAF] Loaded', buffers.length, 'chip(s)');
-    app.mmu = new MMU(app.ppi1, app.ppi2, app.pit, app.uart);
-    for (let i = 0; i < Math.min(buffers.length, 3); i++) {
-      app.mmu.loadROM(buffers[i], i * 0x2000);
-    }
-    app.romLoaded = true;
-    app.cpu = new CPU8080(
-      (addr) => app.mmu.readByte(addr),
-      (addr, val) => app.mmu.writeByte(addr, val)
-    );
-    app.plotter.reset();
-    app._resetState();
-    app._rebuildDisasm(0);
-    app._updateMemoryDump(0x6000);
-    app._updateIO();
-    app._updatePlotterUI();
-    app.els.btnStep.disabled = false;
-    app._setLoadStatus('✓ ROM автозагружены: ' + buffers.length + ' чипа', 'ok');
-  } else {
-    console.warn('[AFTOGRAF] Auto-load FAILED: no ROM files found');
-    app._setLoadStatus('⚠ ROM не найдены. Нажмите ⚙ Настройки → Загрузить', 'error');
-  }
+  console.log('[AFTOGRAF] No firmware found — waiting for manual load');
 }
 
-tryAutoLoadROMs();
 
 

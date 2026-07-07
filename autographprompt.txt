@@ -1,0 +1,99 @@
+# Aftograf-882 Debuger — Project Prompt
+
+## Цель
+Интерактивный браузерный отладчик-симулятор для советского графопостроителя **Автограф-882** на базе **К580ИК80 (Intel 8080)**.
+Версия v0.0.6. Эмуляция CPU, памяти, периферии (PPI, PIT, USART), дизассемблер прошивки, симуляция плоттера, загрузка HPGL.
+
+## Архитектура
+- SPA в браузере, без серверной логики
+- ES6+ модули → `bundle.js` через `node build.js`
+- Тёмная тема, моноширинный шрифт
+
+## CPU (cpu8080.js)
+- Полная эмуляция К580ИК80: 256 опкодов, табличный метод
+- Регистры: A,B,C,D,E,H,L,SP,PC, флаги S,Z,AC,P,CY
+- T-состояния, HLT, IE (INTR — USART RST 7)
+
+## Память (memory.js)
+- ROM $0000-$5FFF (read OK, write → warn+skip)
+- RAM $6000-$63FF (read/write)
+- PPI1 $E000, PPI2 $E400, PIT $E800, USART $EC00
+- unmapped: read 0xFF, write → warn+skip
+
+## I/O
+- PPI8255: 3 порта + ctrl
+- PIT8253: 3 счётчика 16-bit
+- USART8251: RX/TX буферы, XOn-XOff, onTxByte, onRxInterrupt
+
+## Плоттер
+- XY шаговые двигатели, 7 цветов пера
+- Чтение координат из RAM по настраиваемым адресам
+- HPGL: IN, SPn, PU x,y, PD x,y — анимация, масштаб, прогресс
+
+## Интерфейс
+
+### Левая колонка
+- Регистры (inline edit), флаги (toggle), Current insn, Stack (50 слов), Pointers, I/O, USART терминал
+
+### Центр (flex)
+- **Disassembler**: 6 колонок, 256 строк, follow-PC, search, BP click, J-key jump, dblclick jump, 📋 copy
+- **Resizable splitter** (drag to resize disasm/memory heights)
+- **Memory**: 64KB virtual scroll, byte edit, region colors
+
+### Правая колонка (A4)
+- Canvas A4 portrait (1:√2), retina, ResizeObserver
+- Grid, lines, position, pen info, HPGL progress/command
+- Кнопки: Clear, Autofit, HPGL
+
+## Клавиатура
+| Клавиша | Действие |
+|---|---|
+| Space / → | Step |
+| R | Reset |
+| F5 | Run / Pause |
+| B | Breakpoint на PC |
+| J | Jump PC к строке под мышью |
+
+## Сессии
+- Save (JSON с датой): CPU + RAM + breakpoints + plotter lines
+- Load: восстановление + _updateAll() + _renderPlotterCanvas()
+
+## Прошивка
+- Авто-загрузка firmware.bin (24KB) или ручная через 📂
+- Диагностика ROM[0..7] и TABLE[0x00],TABLE[0xF3] в консоли
+
+## Версия
+v0.0.6 — заголовок `Aftograf-882 Debuger v0.0.6`
+
+## Запуск
+```bash
+cd ~/work/Antigravity/github/aftograf
+python3 -m http.server 8080
+# http://localhost:8080/sim/
+```
+
+## Сборка
+```bash
+cd sim && node build.js
+```
+
+## Файлы
+```
+./
+├── autographprompt.txt
+├── CHECKPOINT.md
+├── disasm8080.py
+├── autograf-882-disassembly.asm
+├── Autograf-882-*Chip*.bin (3×8KB)
+├── 01_Plotter-*-Schematic.pdf
+└── sim/
+    ├── index.html
+    ├── styles.css
+    ├── settings.js
+    ├── memory.js
+    ├── cpu8080.js
+    ├── main.js
+    ├── bundle.js
+    ├── build.js
+    └── firmware.bin (24KB)
+```

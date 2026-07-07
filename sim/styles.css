@@ -1,7 +1,5 @@
 /* Autograf-882 Debug Simulator — Dark theme */
-
 * { box-sizing: border-box; margin: 0; padding: 0; }
-
 :root {
   --bg: #1a1b26;
   --panel-bg: #24283b;
@@ -18,7 +16,6 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
   --font-ui: 'Segoe UI', system-ui, sans-serif;
 }
-
 body {
   background: var(--bg);
   color: var(--text);
@@ -26,22 +23,19 @@ body {
   font-size: 14px;
   overflow-x: hidden;
 }
-
 #app {
   display: flex;
   flex-direction: column;
   height: 100vh;
 }
-
 /* Main layout — 3 колонки: отладка | дизассемблер+память | плоттер A4 */
 #main-layout {
   display: flex;
   flex: 1;
   overflow: hidden;
 }
-
 #left-region {
-  width: 180px;
+  width: 200px;
   flex-shrink: 0;
   overflow-y: auto;
   padding: 4px 6px;
@@ -50,7 +44,6 @@ body {
   flex-direction: column;
   gap: 4px;
 }
-
 #center-region {
   flex: 1;
   display: flex;
@@ -59,65 +52,72 @@ body {
   padding: 4px 6px;
   overflow: hidden;
 }
-
 #disasm-section {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-
 #asm-list {
   flex: 1;
   overflow-y: auto;
   min-height: 60px;
 }
-
 #memory-section {
-  flex-shrink: 0;
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+  margin-top: 4px;
 }
-
 #right-region {
-  width: 400px;
-  flex-shrink: 0;
+  width: auto;
+  flex: 0 0 auto;
   border-left: 1px solid var(--border);
   overflow-y: auto;
-  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
 }
-
 header {
   padding: 4px 12px;
   background: var(--panel-bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
-
 #header-main {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 4px;
 }
-
 #header-controls {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
-
 #header-controls .btn-row {
   display: flex;
   gap: 4px;
 }
-
 #header-controls .speed-row {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
 }
-
+#shortcuts-hint kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: #2f3349;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--cyan);
+}
 /* Sections */
 section {
   margin-bottom: 8px;
@@ -131,7 +131,6 @@ section h2 {
   padding-bottom: 2px;
   border-bottom: 1px solid var(--border);
 }
-
 /* Controls */
 #controls h2 { margin-bottom: 6px; }
 .btn-row {
@@ -154,7 +153,6 @@ section h2 {
 .ctrl-btn:hover { background: #3f4359; }
 .ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .ctrl-btn:active { background: var(--hl); color: #1a1b26; }
-
 .speed-row {
   display: flex;
   align-items: center;
@@ -165,7 +163,6 @@ section h2 {
 }
 .speed-row input { flex: 1; }
 #speed-label { font-family: var(--font-mono); min-width: 50px; text-align: right; }
-
 /* Register table */
 #reg-table {
   width: 100%;
@@ -185,12 +182,38 @@ section h2 {
   text-align: right;
   font-weight: 600;
   color: var(--cyan);
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 3px;
+  transition: background 0.1s;
 }
-.hl-pc {
+.reg-val:hover {
+  background: rgba(125,207,255,0.15);
+}
+.reg-val.editing {
+  background: #1a1b26;
+  outline: 1px solid var(--hl);
+  cursor: text;
+}
+.reg-val.hl-pc {
   color: var(--green);
   font-weight: 700;
 }
-
+.reg-val-inp {
+  background: #1a1b26;
+  color: var(--hl);
+  border: 1px solid var(--hl);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  width: 42px;
+  text-align: center;
+  padding: 1px 2px;
+  outline: none;
+}
+.reg-val-inp.pc-sp {
+  width: 52px;
+}
 /* Flags */
 #flags {
   display: flex;
@@ -213,7 +236,15 @@ section h2 {
   background: var(--green);
   color: #1a1b26;
 }
-
+.flag.clickable {
+  cursor: pointer;
+}
+.flag.clickable:hover {
+  background: #3f4359;
+}
+.flag.active.clickable:hover {
+  background: #8abf5e;
+}
 /* Current instruction */
 .insn-display {
   font-family: var(--font-mono);
@@ -231,7 +262,6 @@ section h2 {
   color: var(--text-dim);
   padding: 0 6px;
 }
-
 /* Disassembly */
 #disasm-section {
   display: flex;
@@ -257,7 +287,6 @@ section h2 {
   width: 80px;
 }
 #toolbar-asm label { color: var(--text-dim); cursor: pointer; }
-
 #asm-list {
   flex: 1;
   overflow-y: auto;
@@ -280,7 +309,6 @@ section h2 {
   white-space: nowrap;
 }
 .asm-line:hover { background: #2f3349; }
-
 .asm-bp {
   width: 20px; flex-shrink: 0;
   text-align: center;
@@ -314,7 +342,6 @@ section h2 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 .asm-line.current {
   background: rgba(125,207,255,0.15);
   border-left: 3px solid var(--cyan);
@@ -328,43 +355,82 @@ section h2 {
 .asm-line.current .asm-mnemonic {
   font-weight: 700;
 }
-
 .asm-line.bp-set .asm-bp {
   color: var(--red);
   font-weight: 700;
 }
-
-/* Memory dump */
+.asm-line.asm-hover {
+  background: rgba(255,158,100,0.12);
+  border-left: 3px solid var(--orange);
+}
+.asm-line.asm-hover .asm-addr {
+  color: var(--orange);
+  font-weight: 700;
+}
+/* Memory dump — scrollable full 64KB */
 #mem-dump {
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1.4;
+  line-height: 1.5;
+}
+#mem-container {
   background: #1f2335;
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 4px;
-  max-height: 300px;
-  overflow-y: auto;
 }
 .mem-line {
   display: flex;
+  cursor: default;
+}
+.mem-line:hover {
+  background: rgba(255,255,255,0.03);
 }
 .mem-addr {
   color: var(--text-dim);
   min-width: 48px;
+  user-select: none;
 }
 .mem-hex {
+  display: flex;
+  gap: 0;
   color: var(--text);
-  min-width: 180px;
+}
+.mem-byte {
+  display: inline-block;
+  min-width: 20px;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.1s;
+}
+.mem-byte:hover {
+  background: rgba(125,207,255,0.15);
+}
+.mem-byte.editing {
+  background: transparent;
 }
 .mem-ascii {
   color: var(--text-dim);
+  margin-left: 8px;
+}
+.mem-byte-inp {
+  background: #1a1b26;
+  color: var(--hl);
+  border: 1px solid var(--hl);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  width: 22px;
+  text-align: center;
+  padding: 0;
+  margin: 0;
+  outline: none;
 }
 .mem-line.watch .mem-addr {
   color: var(--yellow);
   font-weight: 700;
 }
-
 #toolbar-mem {
   display: flex;
   align-items: center;
@@ -392,7 +458,6 @@ section h2 {
   font-size: 12px;
 }
 .small-btn:hover { background: #3f4359; }
-
 /* I/O panel */
 #io-panel {
   font-family: var(--font-mono);
@@ -420,9 +485,11 @@ section h2 {
 }
 .io-reg-name { color: var(--text-dim); }
 .io-reg-val { color: var(--cyan); }
-
-/* Plotter section */
+/* Plotter section — A4 portrait */
 #plotter-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   padding: 4px;
 }
 #plotter-section h2 {
@@ -433,18 +500,20 @@ section h2 {
   margin-bottom: 4px;
 }
 #plotter-container {
+  flex: 1;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
+  min-height: 200px;
 }
 #plotter-canvas {
   border: 1px solid var(--border);
   border-radius: 4px;
   background: #f5f0e8;
   cursor: crosshair;
-  width: 100%;
-  height: auto;
-  aspect-ratio: 1/1;
+  max-height: calc(100vh - 180px);
+  width: auto;
 }
 #plotter-info {
   display: flex;
@@ -454,7 +523,24 @@ section h2 {
   color: var(--text);
   flex-wrap: wrap;
 }
-
+/* Plotter info */
+#plotter-color {
+  font-weight: bold;
+  font-family: var(--font-mono);
+}
+#plotter-info span {
+  margin-right: 12px;
+}
+/* USART Terminal */
+#usart-section {
+  flex-shrink: 0;
+}
+#usart-terminal {
+  font-size: 10px;
+}
+#usart-rx-log {
+  resize: vertical;
+}
 /* Load status message */
 #load-status {
   font-size: 11px;
@@ -467,20 +553,9 @@ section h2 {
 .load-status-ok   { color: var(--green); background: rgba(158,206,106,0.1); }
 .load-status-error{ color: var(--red);   background: rgba(247,118,142,0.1); }
 .load-status-info { color: var(--cyan);  background: rgba(125,207,255,0.1); }
-
-/* Plotter info */
-#plotter-color {
-  font-weight: bold;
-  font-family: var(--font-mono);
-}
-#plotter-info span {
-  margin-right: 12px;
-}
-
 /* ═══════════════════════════════════════
  * Settings Panel
  * ═══════════════════════════════════════ */
-
 .settings-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -490,7 +565,6 @@ section h2 {
   justify-content: center;
   z-index: 1000;
 }
-
 .settings-panel {
   background: var(--panel-bg);
   border: 1px solid var(--border);
@@ -501,7 +575,6 @@ section h2 {
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 }
-
 .settings-header {
   display: flex;
   justify-content: space-between;
@@ -513,13 +586,11 @@ section h2 {
   font-size: 16px;
   margin: 0;
 }
-
 .settings-body {
   padding: 12px 16px;
   overflow-y: auto;
   flex: 1;
 }
-
 .settings-section {
   margin-bottom: 16px;
 }
@@ -530,7 +601,6 @@ section h2 {
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
 }
-
 .settings-table {
   width: 100%;
   border-collapse: collapse;
@@ -561,7 +631,6 @@ section h2 {
   border-color: var(--hl);
   outline: none;
 }
-
 .settings-row {
   margin: 6px 0;
   display: flex;
@@ -586,7 +655,6 @@ section h2 {
   font-size: 11px !important;
   color: var(--text-dim) !important;
 }
-
 .custom-readout {
   margin-top: 6px;
   font-family: var(--font-mono);
@@ -603,4 +671,13 @@ section h2 {
 .custom-readout .readout-name {
   color: var(--text-dim);
   min-width: 100px;
+}
+/* Stack */
+#stack-display div {
+  display: flex;
+  gap: 6px;
+}
+.stack-sp {
+  color: var(--yellow);
+  font-weight: 700;
 }

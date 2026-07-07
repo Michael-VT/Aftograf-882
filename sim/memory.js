@@ -24,6 +24,8 @@ export class MMU {
     this.ppi2 = ppi2;
     this.pit = pit;
     this.uart = uart;
+    this.lastWriteAddr = -1; // address of last write (for debugger)
+    this.onInvalidWrite = null; // callback(addr, val) for writes outside RAM
   }
 
   /** Load a firmware image (byte array) at the given offset */
@@ -71,7 +73,7 @@ export class MMU {
   writeByte(addr, val) {
     addr &= 0xffff;
     val &= 0xff;
-
+    this.lastWriteAddr = addr;
     if (addr >= 0x6000 && addr < 0x6400) {
       this.ram[addr & 0x3ff] = val;
       return;
@@ -92,7 +94,12 @@ export class MMU {
       this.uart.write(addr & 0x01, val);
       return;
     }
-    // Writes to ROM are silently ignored
+    // Write to ROM or unmapped area — log error but continue
+    const region = addr < 0x6000 ? `ROM ($${addr.toString(16).padStart(4,'0').toUpperCase()})`
+      : addr < 0xe000 ? `свободная ($${addr.toString(16).padStart(4,'0').toUpperCase()})`
+      : `зарезервированная ($${addr.toString(16).padStart(4,'0').toUpperCase()})`;
+    console.warn(`[MMU] Запись $${val.toString(16).padStart(2,'0').toUpperCase()} в ${region} — игнорировано`);
+    if (this.onInvalidWrite) this.onInvalidWrite(addr, val);
   }
 
   /** Get a contiguous block for disassembler or memory dump */
