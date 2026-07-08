@@ -92,3 +92,7 @@ Falls nicht vorhanden, nutze den 📂-Button oder Einstellungen → Firmware lad
 | `B` | Breakpoint an PC umschalten |
 | `J` | PC zur Adresse unter dem Cursor springen |
 | `?` / `/` | Hilfe öffnen |
+
+---
+
+**Andere Sprachen:** [English](README.md) · [Русский](README.RU.md) · [Português](README.PT.md) · [Українська](README.UA.md) · [Français](README.FR.md) · [Deutsch](README.DE.md)

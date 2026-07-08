@@ -93,3 +93,7 @@ Se ausente, use o botão 📂 ou Configurações → Carregar firmware.
 | `B` | Alternar breakpoint no PC |
 | `J` | Saltar PC para o endereço sob o cursor |
 | `?` / `/` | Abrir ajuda |
+
+---
+
+**Outros idiomas:** [English](README.md) · [Русский](README.RU.md) · [Português](README.PT.md) · [Українська](README.UA.md) · [Français](README.FR.md) · [Deutsch](README.DE.md)

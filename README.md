@@ -143,3 +143,7 @@ Reverse-engineering and documentation of the Autograf-882 hardware for preservat
 
 - The Soviet engineers who designed the K580IK80A and the Autograf-882
 - The open-source community for 8080 emulation references
+
+---
+
+**Other languages:** [English](README.md) · [Русский](README.RU.md) · [Português](README.PT.md) · [Українська](README.UA.md) · [Français](README.FR.md) · [Deutsch](README.DE.md)

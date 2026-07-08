@@ -91,3 +91,7 @@ Si absent, utiliser le bouton 📂 ou Paramètres → Charger le firmware.
 | `B` | Basculer point d'arrêt sur PC |
 | `J` | Sauter PC à l'adresse sous le curseur |
 | `?` / `/` | Ouvrir l'aide |
+
+---
+
+**Autres langues :** [English](README.md) · [Русский](README.RU.md) · [Português](README.PT.md) · [Українська](README.UA.md) · [Français](README.FR.md) · [Deutsch](README.DE.md)

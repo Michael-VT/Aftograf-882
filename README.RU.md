@@ -138,3 +138,7 @@ cd sim && node build.js
 ## Лицензия
 
 Реверсинжиниринг и документирование аппаратуры Автограф-882 в целях сохранения и образования.
+
+---
+
+**Другие языки:** [English](README.md) · [Русский](README.RU.md) · [Português](README.PT.md) · [Українська](README.UA.md) · [Français](README.FR.md) · [Deutsch](README.DE.md)

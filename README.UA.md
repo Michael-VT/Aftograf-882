@@ -92,3 +92,7 @@ python3 -m http.server 8080
 | `B` | Breakpoint на PC |
 | `J` | Перехід PC до адреси під курсором |
 | `?` / `/` | Відкрити довідку |
+
+---
+
+**Інші мови:** [English](README.md) · [Русский](README.RU.md) · [Português](README.PT.md) · [Українська](README.UA.md) · [Français](README.FR.md) · [Deutsch](README.DE.md)
