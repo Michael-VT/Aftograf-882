@@ -321,8 +321,10 @@ class Plotter {
     this.tableXmax = 17200;  // plotter working area (HPGL units)
     this.tableYmin = 0;
     this.tableYmax = 12200;
-  }
-  checkLimits() {
+    this.limitYmax = false;
+    this.limitPenUp = false;   // pen mechanism at top (change position)
+    this.limitPenDn = false;   // pen mechanism at bottom (change position)
+    this.tableXmin = 0;
     this.limitXmin = this.xPos <= this.tableXmin;
     this.limitXmax = this.xPos >= this.tableXmax;
     this.limitYmin = this.yPos <= this.tableYmin;
@@ -1960,7 +1962,6 @@ class App {
       else if (ev.key === 'Tab') {
         ev.preventDefault();
         finish(true);
-        // Find next byte
         const next = byteSpan.nextElementSibling;
         if (next && next.classList.contains('mem-byte')) {
           this._editMemoryByte(next);
@@ -1968,17 +1969,14 @@ class App {
       }
     });
   }
-  _commitByteEdit() {
-    if (!this.editingByte) return;
-    const inp = this.editingByte.input;
-    if (inp) inp.blur();
-  }
   _updateIO() {
     const panel = this.els.ioPanel;
     const pc = this.ppi1.portC;
     const ledOn = (bit) => (pc & (1 << bit)) ? 'led-on' : 'led-off';
     const ls = this.plotter;
     const buzActive = this.pit.isBuzzerActive();
+    const limBtn = (label, prop, bit) =>
+      `<button class="limit ${ls[prop]?'limit-on':'limit-off'}" data-lim="${prop}" style="cursor:pointer">${label}</button>`;
     panel.innerHTML = `
       <div class="io-block">
         <div class="io-name">Зуммер (PIT OUT1)</div>
@@ -1997,12 +1995,14 @@ class App {
         </div>
       </div>
       <div class="io-block">
-        <div class="io-name">Концевые датчики</div>
+        <div class="io-name">Концевые датчики (клик — переключить)</div>
         <div class="limit-row">
-          <span class="limit ${ls.limitXmin?'limit-on':'limit-off'}">X←</span>
-          <span class="limit ${ls.limitXmax?'limit-on':'limit-off'}">X→</span>
-          <span class="limit ${ls.limitYmin?'limit-on':'limit-off'}">Y↓</span>
-          <span class="limit ${ls.limitYmax?'limit-on':'limit-off'}">Y↑</span>
+          ${limBtn('X←','limitXmin',0)}${limBtn('X→','limitXmax',1)}
+          ${limBtn('Y↓','limitYmin',2)}${limBtn('Y↑','limitYmax',3)}
+        </div>
+        <div class="limit-row" style="margin-top:4px">
+          ${limBtn('PenUp','limitPenUp',4)}${limBtn('PenDn','limitPenDn',5)}
+          <span style="font-size:9px;color:var(--text-dim);margin-left:4px">механизм смены пера</span>
         </div>
         <div class="io-reg">Поз: <span class="io-reg-val">X=${this.plotter.xPos} Y=${this.plotter.yPos}</span></div>
       </div>
@@ -2031,7 +2031,16 @@ class App {
         <div><span class="io-reg">RX буфер: <span class="io-reg-val">${this.uart.rxBuffer.length} байт</span></span></div>
       </div>
     `;
+    // Bind limit switch clicks
+    panel.querySelectorAll('[data-lim]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const prop = btn.dataset.lim;
+        this.plotter[prop] = !this.plotter[prop];
+        this._updateIO();
+      });
+    });
   }
+
   _updatePlotterUI() {
     const set = (el, val) => { if (el) el.textContent = val; };
     set(this.els.plotterPos, `X: ${this.plotter.xPos} Y: ${this.plotter.yPos}`);

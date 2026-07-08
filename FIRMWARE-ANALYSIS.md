@@ -4,8 +4,8 @@
 
 Three D2764A EPROMs (8KB each) at `$0000-$5FFF`:
 - **Chip 1** ($0000-$1FFF): Reset, initialization, low-level routines, HPGL parser, serial I/O
-- **Chip 2** ($2000-$3FFF): Main program logic, coordinate math, Bresenham interpolation
-- **Chip 3** ($4000-$5FFF): Plotter motor control, pen control, font/character tables
+- **Chip 2** ($2000-$3FFF): Main program logic, coordinate math, Bresenham interpolation, pen control
+- **Chip 3** ($4000-$5FFF): Plotter motor control, character generator, font tables
 
 ## Memory Map
 
@@ -24,146 +24,160 @@ $EC00-$EFFF  SIO  (КР580ВВ51А / i8251) — Serial (RS-232)
 
 ### PIO1 Control ($E003 = $92 = 1001 0010)
 ```
-D7 = 1   Mode set
-D6,D5 = 00  Group A mode 0 (basic I/O)
-D4 = 1   Port A = INPUT  (keyboard rows read)
-D3 = 0   Port C upper (PC4-PC7) = OUTPUT (LEDs)
-D2 = 0   Group B mode 0
-D1 = 1   Port B = INPUT  (DIP switches read)
-D0 = 0   Port C lower (PC0-PC3) = OUTPUT (keyboard columns)
+PA = INPUT  — keyboard rows (PA0-PA5)
+PB = INPUT  — DIP switches (PB4-PB7) + limit switches (PB0-PB3)
+PC = OUTPUT — keyboard columns (PC0-PC1), LEDs (PC2-PC5)
 ```
 
 ### PIO2 Control ($E403 = $80 = 1000 0000)
 ```
-D7 = 1   Mode set
-D6,D5 = 00  Group A mode 0
-D4 = 0   Port A = OUTPUT (stepper motor phases)
-D3 = 0   Port C upper = OUTPUT
-D2 = 0   Group B mode 0
-D1 = 0   Port B = OUTPUT (ExecBoard control)
-D0 = 0   Port C lower = OUTPUT (pen control)
+PA = OUTPUT — stepper motor phases
+PB = OUTPUT — ExecBoard control signals
+PC = OUTPUT — pen control (PC0-PC3), timer CE (PC7)
 ```
 
-## Peripherals
+## Peripherals — U3 К555ИД7 (74LS154) Decoder
 
-### U3 К555ИД7 (74LS154) Address Decoder
 ```
-Y0  $E000-$E3FF  PIO1 — КР580ВВ55 (i8255)
-   PA0-PA5 = Keyboard row outputs (6 rows)
-   PB4-PB7 = DIP switches ComCfg1-4 (4 bits, active high/low)
-   PC0-PC1 = Keyboard column inputs (2 columns)
-   PC2-PC5 = 4 LEDs (active high: 1=ON, 0=OFF)
+Y0  $E000-$E3FF  PIO1
+   PA0-PA5 = keyboard rows (6)
+   PB4-PB7 = DIP switches ComCfg1-4
+   PB0-PB3 = limit switches (Xmin, Xmax, Ymin, Ymax)
+   PC0-PC1 = keyboard columns (2)
+   PC2-PC5 = LEDs (1=ON)
 
-Y1  $E400-$E7FF  PIO2 — КР580ВВ55 (i8255)
-   PB0-PB1 = ExecBoard signals (Net12, Net13)
-   PC0-PC3 = Pen control (4 lines)
-   PC5     = Net5
-   PC7     = i8253 CE1 (timer chip enable)
+Y1  $E400-$E7FF  PIO2
+   PB0-PB1 = ExecBoard signals
+   PC0-PC3 = pen control (4 lines, differential)
+   PC7     = i8253 CE1
 
-Y2  $E800-$EBFF  PIT — КР580ВИ53 (i8253)
-   OUT0 = SIO clock (baud rate generator for i8251)
+Y2  $E800-$EBFF  PIT
+   OUT0 = SIO clock (i8251 baud rate)
    OUT1 = Buzzer
 
-Y3  $EC00-$EFFF  SIO — КР580ВВ51А (i8251 USART)
-   RxD, TxD, RTS, CTS, DTR, DSR — full RS-232 handshake
+Y3  $EC00-$EFFF  SIO
+   RxD, TxD, RTS, CTS, DTR, DSR
 ```
 
-## IN/OUT I/O Port Mapping
+## I/O Port Mapping (IN/OUT instructions)
 
-The 8080 has a SEPARATE I/O address space accessed via `IN`/`OUT` instructions.
-The firmware uses these I/O ports:
-
-| Port | Device | Usage |
-|------|--------|-------|
-| $19  | USART data | Serial data read/write |
-| $28  | USART status/ctrl | Check RXRDY/TXRDY, send commands |
-| $0A  | (unknown) | Used in initialization |
-| $0C  | (unknown) | Used in initialization |
-| $63  | (output) | LED/control write |
-
-**IMPORTANT**: Our current emulator maps `IN port` → `readByte(0xE000|port)` which sends `IN $19` to `$E019` (PIO1 range). This is **WRONG** — the hardware has separate I/O and memory spaces.
+The 8080 has separate I/O space. Our emulator routes:
+| Port | Device | Function |
+|------|--------|----------|
+| $19  | USART data | Read/write serial byte |
+| $28  | USART status | Check RXRDY/TXRDY |
+| other | $E000+port | Fallback to memory space |
 
 ## RAM Variables
 
-### Coordinate System (confirmed from firmware analysis)
-
 | Address | Name | Description |
 |---------|------|-------------|
-| $6140 | STACK_TOP | Stack pointer initialized here |
+| $6140 | STACK_TOP | Stack pointer = $6140 |
+| $6148 | CUR_CHAR | Current received char from USART |
+| $6149 | TEMP_HL | Temporary HL storage |
 | $6180-$6181 | X_POS | Current X position (LO, HI) |
-| $6182-$6183 | X_ACCUM | X accumulator (Bresenham) |
-| $6184-$6185 | Y_ACCUM | Y accumulator (Bresenham) |
+| $6182-$6183 | X_ACCUM | X Bresenham accumulator |
+| $6184-$6185 | Y_ACCUM | Y Bresenham accumulator |
 | $6186-$6187 | Y_POS | Current Y position (LO, HI) |
 | $6188-$6189 | X_TARGET | X destination |
 | $618A-$618B | Y_TARGET | Y destination |
-| $61C8-$61C9 | X_DELTA | Delta X for interpolation |
-| $61CA-$61CB | Y_DELTA | Delta Y for interpolation |
-| $61E8 | PEN_COLOR | Current pen number (0-6) |
-| $63F0 | PEN_STATE | Bit 0 = pen down (1) / up (0) |
-| $63F2 | LED_STATE | LED bits (PC2-PC5 on PPI1) |
+| $61A3-$61A4 | COORD_A | HPGL parameter A |
+| $61A5-$61A6 | COORD_B | HPGL parameter B |
+| $61C8-$61C9 | X_DELTA | Delta X (Bresenham) |
+| $61CA-$61CB | Y_DELTA | Delta Y (Bresenham) |
+| $61E8 | PEN_COLOR | Pen number 0-6 |
+| $63F0 | PEN_STATE | Bit 0: pen down (1) |
+| $63F2 | LED_STATE | Mirrors PIO1.PC LED bits |
 
-### Multiple coordinate sets
-The firmware uses several coordinate register pairs at $61A3-$61B0 for HPGL command parameter storage and transformation (scaling, rotation).
+## Firmware Subroutine Table
+
+### Chip 1 ($0000-$1FFF) — Low-Level Routines
+
+| Address | Called | Signature | Description |
+|---------|--------|-----------|-------------|
+| **$027C** | 18× | `3A 8B 63 32 8C 63` | **Save byte to RAM buffer** — writes A to $638B, shifts to $638C |
+| **$0288** | 16× | `3A 8C 63 32 8B 63` | **Load byte from RAM buffer** — restores from $638C→$638B |
+| **$0762** | 17× | `CD 44 61 FE 00 6F` | **Read keyboard/DIP** — reads PIO1 port C, checks config bits |
+| **$0AFF** | 16× | `3A 01 EC E6 02 CA` | **USART receive byte** — read $EC01 status, check RXRDY bit 1, read $EC00 |
+| **$0B4A** | 1× | `STA $EC00` | **USART send byte** — write A to USART data, wait for TXRDY |
+| **$0C8D** | — | `CD 44 61` | **USART read with wait** — loop until byte received |
+| **$0F1A** | — | — | **Parse HPGL command** — dispatches to handlers |
+| **$110C** | 30× | `F5 AF 32 2F 63 32` | **Save state** — push register state to RAM save area |
+| **$1116** | 18× | `F5 3E FF 32 2F 63` | **Restore state** — pop register state from RAM save area |
+| **$19CA** | 46× | `3A 48 61 FE 20 C2` | **USART check char** — compare received char with threshold, branch |
+| **$19D8** | 33× | `CD 44 61 3A 48 61` | **USART get char** — wait for USART char, return in A |
+| **$19DB** | 25× | `3A 48 61 FE 20 C2` | **Char classification** — check if char is printable/control |
+| **$1CE0** | 40× | `2A 5D 63 3A 8B 63` | **Coordinate load** — loads coordinate pair from RAM |
+| **$2252** | 19× | `3E 63 32 B7 63 3A` | **Set speed/acceleration** — configures movement speed |
+
+### Chip 2 ($2000-$3FFF) — Main Logic & Math
+
+| Address | Called | Signature | Description |
+|---------|--------|-----------|-------------|
+| **$2587** | 16× | `CD 44 61 3A AC 61` | **Coordinate transform** — scale/rotate coordinates |
+| **$2648** | 22× | `CD 44 61 06 07 AF` | **Multi-byte multiply** — 8×8→16 multiply routine |
+| **$264B** | 16× | `06 07 AF 21 00 00` | **16-bit multiply** — HL × DE → HL |
+| **$27EA** | 37× | `7C BA C0 7D BB C9` | **Compare HL** — compare HL with DE, set flags |
+| **$27F0** | 26× | `7D 93 6F 7C 9A 67` | **Subtract HL-DE** — HL = HL - DE (16-bit) |
+| **$28BB** | 24× | `44 19 1F AC A8 AA` | **Bresenham step** — single interpolation step |
+| **$2957** | 22× | `7B CD 70 29 E5 F5` | **Line draw** — draw line from (x1,y1) to (x2,y2) |
+| **$3109** | 22× | `7C BA C0 7D BB C9` | **Compare signed** — signed 16-bit comparison |
+| **$35E5** | 21× | `7C BA C0 7D BB C9` | **Absolute value** — compute |HL| |
+
+### Chip 3 ($4000-$5FFF) — Plotter & Fonts
+
+| Address | Called | Signature | Description |
+|---------|--------|-----------|-------------|
+| **$41C7** | 1× | `OUT $FA` | **Stepper motor sequence** — outputs phase pattern |
+| **$45F4** | 1× | `OUT $4C` | **Pen solenoid control** — actuate pen lift/drop |
+| **$4668** | — | `IN $48` | **Read limit switches** — read limit switch inputs |
+| **$58C5** | 1× | `OUT $E5` | **ExecBoard command** — send command to ExecBoard |
+| **$5CA0-$5E00** | — | — | **Character generator** — glyph rendering routines |
+| **$5E00-$5FFF** | — | — | **Font tables** — character definitions + ASCII maps |
+
+### Reset Vector ($0000) — Boot Sequence
+
+```
+$0000  DI                      ; Disable interrupts
+$0001  MVI A,$80 → STA $E403  ; PIO2 control = all output
+$0006  LXI H,$6000            ; Start RAM test
+$0009  LXI B,$55AA            ; Test pattern
+$000C  RAM test loop          ; Write/verify $55/$AA through $6000-$67FF
+$001F  LXI SP,$6140           ; Stack pointer
+$0022  LXI H,$E003 → MVI M,$92 ; PIO1: PA+PB=input, PC=output
+$0032  LXI H,$E803            ; Timer control
+$003C  MVI M,$36 → MVI M,$76  ; PIT: cntr0 mode3 + cntr1 mode3
+$0040  LDA $E002              ; Read PIO1 port C
+$0043-0084  Decode DIP switches (PB4-PB7) → configure baud rate, protocol
+```
 
 ## Special Debug Markers
 
-The user embedded Z80 opcode prefixes as breakpoint markers for the debugger:
+The user embedded Z80 opcode prefixes as breakpoints:
 
-| Byte | Count | Alias | Purpose |
-|------|-------|-------|---------|
-| $DD | 6 | IX prefix | Debug breakpoint |
-| $ED | 14 | Extended prefix | Debug breakpoint |
-| $FD | 25 | IY prefix | Debug breakpoint |
+| Byte | Count | Purpose |
+|------|-------|---------|
+| $FD | 25 | Debug breakpoint — pause execution |
+| $ED | 14 | Debug breakpoint |
+| $DD | 6 | Debug breakpoint |
 
-On a real 8080 these are effectively `NOP` (skipped or harmless).
-The debugger should treat these as breakpoints and pause execution.
+## Startup Sequence Detail
 
-**Key locations:**
-- $0204: FD — early in initialization (break before RAM test complete)
-- $0204, $0283, $051C: FD — during configuration checks
-- $07B8: ED — near keyboard scan routine
-- $07D9: DD — near keyboard scan
-- $0EAF: ED — near serial receive routine
-- $1A04: FD — near pen control
-- $238E, $23DA: FD — Chip2 coordinate math
+1. **RAM test** ($000C-001C): Write $55, $AA to all RAM, verify. On fail → error handler $0229
+2. **PIO1 init** ($0022-0031): Port A+B = input, Port C = output. Write $FC as initial state
+3. **Timer init** ($003C-003E): Counter 0 = mode 3 (USART clock), Counter 1 = mode 3 (buzzer)
+4. **DIP read** ($0040-0084): Read DIP switches from PIO1.PC, decode baud rate and protocol
+5. **Main loop entry** → Jump to $0090 after initialization completes
 
-## Font Table Area ($5E00-$5FFF)
+## Limit Switches
 
-- $5E00-$5EDF: Character address lookup table (128 entries × 2 bytes = pointers to glyphs)
-- $5EE0-$5EE4: Additional pointers
-- $5EE8-$5F5F: ASCII uppercase + digits + punctuation lookup
-- $5F5E-$5FFF: ASCII lowercase + extended chars
+| Bit | Pin | Signal | Description |
+|-----|-----|--------|-------------|
+| PIO1.PB0 | PB0 | LIMIT_XMIN | X axis minimum (left edge) |
+| PIO1.PB1 | PB1 | LIMIT_XMAX | X axis maximum (right edge) |
+| PIO1.PB2 | PB2 | LIMIT_YMIN | Y axis minimum (bottom edge) |
+| PIO1.PB3 | PB3 | LIMIT_YMAX | Y axis maximum (top edge) |
+| — | — | LIMIT_PEN_UP | Pen mechanism at top (change position) |
+| — | — | LIMIT_PEN_DN | Pen mechanism at bottom (change position) |
 
-Each character glyph is probably 8-12 bytes defining a 8×N pixel pattern.
-
-## Serial Protocol
-
-The host (EC-1841 / IBM PC/XT) sends HPGL commands via RS-232:
-
-1. Host sends HPGL command string (e.g., `"IN;SP1;PA100,100;PD;"`)
-2. USART interrupt (RST 7) triggers firmware to read byte
-3. Firmware parses: `IN` → init, `SP` → select pen, `PU` → pen up, `PD` → pen down
-4. `PA x,y` → plot absolute, `PR dx,dy` → plot relative
-5. Coordinates are 2-byte values (LO, HI) at $6180/$6186
-6. Bresenham line algorithm interpolates between current and target
-
-## Startup Sequence
-
-```
-$0000: DI                     — Disable interrupts
-$0001: MVI A,$80 → STA $E403  — PIO2 control = mode 0, all output
-$0006: LXI H,$6000            — Start of RAM
-$0009: LXI B,$55AA            — Test pattern
-$000C: RAM test loop          — Write $55/$AA, verify, loop through $6000-$67FF
-$001F: LXI SP,$6140            — Set stack pointer
-$0022: LXI H,$E003 → MVI M,$92 — PIO1 control = PA input, PB input, PC output
-$0029: DCX H → DCX H → MVI M,$FC — Write $FC to PIO port
-$0032: LXI H,$E803 → JMP $003C — Timer control setup
-$003C: MVI M,$36 → MVI M,$76  — PIT mode 3, square wave
-$0040: LDA $E002 → check PIO1.PC — Read keyboard columns
-$004B-0084: Decode DIP switches (PB4-PB7) → set baud rate, protocol
-$00A0: SHLD $6149              — Store HL
-$00C0: CALL $223C              — Init plotter
-$00C5: STA $E001   → MVI M,$EE — PIO1.PB = $EE (test DIP?)
-$00D0: LXI H,$10A4            — Font table base
-```
+The firmware reads limit switches during homing sequence and as safety stops during movement. When triggered, movement in that direction stops. The limit bits are fed into PIO1 port B bits PB0-PB3 along with DIP switches on PB4-PB7.

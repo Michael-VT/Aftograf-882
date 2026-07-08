@@ -499,7 +499,7 @@ function buildOpcodeTable(cpu) {
     [0xe0,'RPO'],[0xe8,'RPE'],[0xf0,'RP'],[0xf8,'RM'],
     [0xc9,'RET'],
   ];
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 9; i++) {
     const [code, name] = RET_OPCODES[i];
     def(code, name, 5, 1, () => {
       if (i < 8 && JMP_COND[i](cpu.flags)) {
