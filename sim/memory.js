@@ -17,7 +17,7 @@
 export class MMU {
   constructor(ppi1, ppi2, pit, uart) {
     this.rom = new Uint8Array(0x6000);
-    this.ram = new Uint8Array(0x0400); // 1KB КР537РУ10
+    this.ram = new Uint8Array(0x0800); // 2KB — firmware tests $6000-$67FF
 
     // Device references
     this.ppi1 = ppi1;
@@ -47,8 +47,8 @@ export class MMU {
     if (addr < 0x6000) {
       return this.rom[addr];
     }
-    if (addr < 0x6400) {
-      return this.ram[addr & 0x3ff];
+    if (addr < 0x6800) {
+      return this.ram[addr & 0x7ff];
     }
     if (addr >= 0xe000 && addr < 0xe400) {
       // PPI1
@@ -74,8 +74,8 @@ export class MMU {
     addr &= 0xffff;
     val &= 0xff;
     this.lastWriteAddr = addr;
-    if (addr >= 0x6000 && addr < 0x6400) {
-      this.ram[addr & 0x3ff] = val;
+    if (addr >= 0x6000 && addr < 0x6800) {
+      this.ram[addr & 0x7ff] = val;
       return;
     }
     if (addr >= 0xe000 && addr < 0xe400) {

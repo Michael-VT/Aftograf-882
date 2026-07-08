@@ -1969,6 +1969,11 @@ class App {
       }
     });
   }
+  _commitByteEdit() {
+    if (!this.editingByte) return;
+    const inp = this.editingByte.input;
+    if (inp) inp.blur();
+  }
   _updateIO() {
     const panel = this.els.ioPanel;
     const pc = this.ppi1.portC;
@@ -2442,8 +2447,8 @@ class App {
   _saveSession() {
     const s = this.cpu.getState();
     // Capture RAM content ($6000-$63FF)
-    const ram = new Uint8Array(0x0400);
-    for (let i = 0; i < 0x0400; i++) ram[i] = this.mmu.peek(0x6000 + i);
+    const ram = new Uint8Array(0x0800); // 2KB ($6000-$67FF)
+    for (let i = 0; i < 0x0800; i++) ram[i] = this.mmu.peek(0x6000 + i);
     // Capture plotter lines
     const lines = this.plotter.lines.map(l => ({ ...l }));
     const session = {
@@ -2493,8 +2498,9 @@ class App {
         this.cpu.cycles = c.cycles; this.cpu.halt = c.halt;
         this.cpu.ie = false;
         // Restore RAM
-        if (session.ram && session.ram.length === 0x0400) {
-          for (let i = 0; i < 0x0400; i++) this.mmu.poke(0x6000 + i, session.ram[i]);
+        if (session.ram) {
+          const ramLen = session.ram.length;
+          for (let i = 0; i < ramLen && i < 0x0800; i++) this.mmu.poke(0x6000 + i, session.ram[i]);
         }
         // Restore breakpoints
         this.breakpoints = new Set(session.breakpoints || []);

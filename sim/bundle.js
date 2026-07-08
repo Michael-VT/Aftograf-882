@@ -282,7 +282,7 @@ class SettingsManager {
 class MMU {
   constructor(ppi1, ppi2, pit, uart) {
     this.rom = new Uint8Array(0x6000);
-    this.ram = new Uint8Array(0x0400); // 1KB КР537РУ10
+    this.ram = new Uint8Array(0x0800); // 2KB — firmware tests $6000-$67FF
 
     // Device references
     this.ppi1 = ppi1;
@@ -312,8 +312,8 @@ class MMU {
     if (addr < 0x6000) {
       return this.rom[addr];
     }
-    if (addr < 0x6400) {
-      return this.ram[addr & 0x3ff];
+    if (addr < 0x6800) {
+      return this.ram[addr & 0x7ff];
     }
     if (addr >= 0xe000 && addr < 0xe400) {
       // PPI1
@@ -339,8 +339,8 @@ class MMU {
     addr &= 0xffff;
     val &= 0xff;
     this.lastWriteAddr = addr;
-    if (addr >= 0x6000 && addr < 0x6400) {
-      this.ram[addr & 0x3ff] = val;
+    if (addr >= 0x6000 && addr < 0x6800) {
+      this.ram[addr & 0x7ff] = val;
       return;
     }
     if (addr >= 0xe000 && addr < 0xe400) {
@@ -3033,6 +3033,11 @@ class App {
       }
     });
   }
+  _commitByteEdit() {
+    if (!this.editingByte) return;
+    const inp = this.editingByte.input;
+    if (inp) inp.blur();
+  }
   _updateIO() {
     const panel = this.els.ioPanel;
     const pc = this.ppi1.portC;
@@ -3506,8 +3511,8 @@ class App {
   _saveSession() {
     const s = this.cpu.getState();
     // Capture RAM content ($6000-$63FF)
-    const ram = new Uint8Array(0x0400);
-    for (let i = 0; i < 0x0400; i++) ram[i] = this.mmu.peek(0x6000 + i);
+    const ram = new Uint8Array(0x0800); // 2KB ($6000-$67FF)
+    for (let i = 0; i < 0x0800; i++) ram[i] = this.mmu.peek(0x6000 + i);
     // Capture plotter lines
     const lines = this.plotter.lines.map(l => ({ ...l }));
     const session = {
@@ -3557,8 +3562,9 @@ class App {
         this.cpu.cycles = c.cycles; this.cpu.halt = c.halt;
         this.cpu.ie = false;
         // Restore RAM
-        if (session.ram && session.ram.length === 0x0400) {
-          for (let i = 0; i < 0x0400; i++) this.mmu.poke(0x6000 + i, session.ram[i]);
+        if (session.ram) {
+          const ramLen = session.ram.length;
+          for (let i = 0; i < ramLen && i < 0x0800; i++) this.mmu.poke(0x6000 + i, session.ram[i]);
         }
         // Restore breakpoints
         this.breakpoints = new Set(session.breakpoints || []);
