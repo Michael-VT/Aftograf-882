@@ -25,6 +25,7 @@ export const DEFAULTS = {
     PEN_STATE:  { label: 'Pen state',        addr: 0x63f0, size: 1 },
     PEN_COLOR:  { label: 'Pen color / num',  addr: 0x61e8, size: 1 },
   },
+  theme: 'dark',
   custom: [],
 };
 
@@ -47,6 +48,7 @@ export class SettingsManager {
 
   _merge(saved) {
     const cfg = {
+      theme: saved.theme === 'light' ? 'light' : 'dark',
       chips: (saved.chips || []).length === 3
         ? saved.chips.map((c, i) => ({ ...DEFAULTS.chips[i], ...c }))
         : DEFAULTS.chips.map(c => ({ ...c })),
@@ -182,6 +184,19 @@ export class SettingsManager {
             </table>
             <div class="settings-row">
               <label class="settings-hint">Изменения применяются сразу, после закрытия настроек</label>
+            </div>
+          </section>
+
+          <!-- Тема оформления -->
+          <section class="settings-section">
+            <h3>Тема оформления</h3>
+            <div class="settings-row">
+              <label for="settings-theme">Режим:</label>
+              <select id="settings-theme" class="cfg-theme-select" style="background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-family:var(--font-mono);font-size:12px">
+                <option value="dark" ${cfg.theme==='dark'?'selected':''}>Тёмная (ночная)</option>
+                <option value="light" ${cfg.theme==='light'?'selected':''}>Светлая (дневная)</option>
+              </select>
+              <label class="settings-hint">Применяется сразу после закрытия настроек</label>
             </div>
           </section>
 

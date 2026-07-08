@@ -307,7 +307,6 @@ function buildOpcodeTable(cpu) {
       case 4: { // ANA
         const r = cpu.a & val;
         cpu.setFlags(r, 0);
-        cpu.flags |= FLAG_CY ? 0 : FLAG_CY; // CY=0 after ANA on real 8080? Actually CY=0 always
         cpu.flags &= ~FLAG_CY; // ANA clears CY, sets AC
         if (((cpu.a | val) & 0x08)) cpu.flags |= FLAG_AC; // AC = (A|operand) bit 3
         cpu.a = r;
@@ -476,8 +475,6 @@ function buildOpcodeTable(cpu) {
     def(code, `${name} $04$02`, 11, 3, () => {
       const addr = cpu.fetchWord();
       if (JMP_COND[i](cpu.flags)) {
-        cpu.pushWord((cpu.pc - addr + 0x10000) > 0xffff ? cpu.pc : cpu.pc); // push return addr
-        // Actually push current PC (points past the 3-byte instruction)
         const retPC = cpu.pc; // pc already advanced by 2 bytes from fetchWord
         cpu.pushWord(retPC);
         cpu.pc = addr;

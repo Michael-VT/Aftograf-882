@@ -27,6 +27,7 @@ const DEFAULTS = {
     PEN_STATE:  { label: 'Pen state',        addr: 0x63f0, size: 1 },
     PEN_COLOR:  { label: 'Pen color / num',  addr: 0x61e8, size: 1 },
   },
+  theme: 'dark',
   custom: [],
 };
 
@@ -49,6 +50,7 @@ class SettingsManager {
 
   _merge(saved) {
     const cfg = {
+      theme: saved.theme === 'light' ? 'light' : 'dark',
       chips: (saved.chips || []).length === 3
         ? saved.chips.map((c, i) => ({ ...DEFAULTS.chips[i], ...c }))
         : DEFAULTS.chips.map(c => ({ ...c })),
@@ -184,6 +186,19 @@ class SettingsManager {
             </table>
             <div class="settings-row">
               <label class="settings-hint">Изменения применяются сразу, после закрытия настроек</label>
+            </div>
+          </section>
+
+          <!-- Тема оформления -->
+          <section class="settings-section">
+            <h3>Тема оформления</h3>
+            <div class="settings-row">
+              <label for="settings-theme">Режим:</label>
+              <select id="settings-theme" class="cfg-theme-select" style="background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-family:var(--font-mono);font-size:12px">
+                <option value="dark" ${cfg.theme==='dark'?'selected':''}>Тёмная (ночная)</option>
+                <option value="light" ${cfg.theme==='light'?'selected':''}>Светлая (дневная)</option>
+              </select>
+              <label class="settings-hint">Применяется сразу после закрытия настроек</label>
             </div>
           </section>
 
@@ -653,7 +668,6 @@ function buildOpcodeTable(cpu) {
       case 4: { // ANA
         const r = cpu.a & val;
         cpu.setFlags(r, 0);
-        cpu.flags |= FLAG_CY ? 0 : FLAG_CY; // CY=0 after ANA on real 8080? Actually CY=0 always
         cpu.flags &= ~FLAG_CY; // ANA clears CY, sets AC
         if (((cpu.a | val) & 0x08)) cpu.flags |= FLAG_AC; // AC = (A|operand) bit 3
         cpu.a = r;
@@ -822,8 +836,6 @@ function buildOpcodeTable(cpu) {
     def(code, `${name} $04$02`, 11, 3, () => {
       const addr = cpu.fetchWord();
       if (JMP_COND[i](cpu.flags)) {
-        cpu.pushWord((cpu.pc - addr + 0x10000) > 0xffff ? cpu.pc : cpu.pc); // push return addr
-        // Actually push current PC (points past the 3-byte instruction)
         const retPC = cpu.pc; // pc already advanced by 2 bytes from fetchWord
         cpu.pushWord(retPC);
         cpu.pc = addr;
@@ -1620,7 +1632,7 @@ function buildDisasmTable() {
   def(0xc6, 'ADI $$$1', 2, 'byte');
   def(0xc7, 'RST 0', 1);
   def(0xc9, 'RET', 1);
-  def(0xcb, 'JMP $$$1', 3, 'word');
+  def(0xcb, 'NOP', 1);
   def(0xcd, 'CALL $$$1', 3, 'word');
   def(0xce, 'ACI $$$1', 2, 'byte');
   def(0xcf, 'RST 1', 1);
@@ -1746,7 +1758,6 @@ class App {
     this.hpglCmds = [];
     this._asmHoverAddr = null;
     this._hpglPaused = false;
-    this._firmwareLoaded = false;
     this._memUpdating = false;
     this._cacheDOM();
     this._bindEvents();
@@ -1756,6 +1767,7 @@ class App {
     this._updateMemoryDump(0x6000);
     this._updateIO();
     this._setupPlotterResize();
+    this._applyTheme(this.settings.config.theme);
   }
   _cacheDOM() {
     this.$ = (id) => document.getElementById(id);
@@ -1817,6 +1829,7 @@ class App {
       hpglUartMode: this.$('hpgl-uart-mode'),
       hpglPause: this.$('hpgl-pause'),
       btnCopyAsm: this.$('btn-copy-asm'),
+      btnHelp: this.$('btn-help'),
     };
   }
   _bindEvents() {
@@ -1833,6 +1846,7 @@ class App {
     if (this.els.btnSettings) this.els.btnSettings.addEventListener('click', () => {
       this._openSettings();
     });
+    if (this.els.btnHelp) this.els.btnHelp.addEventListener('click', () => this._openHelp());
     if (this.els.romFileInput) this.els.romFileInput.addEventListener('change', (e) => this._handleROMFiles(e));
     if (this.els.asmSearch) this.els.asmSearch.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -1919,6 +1933,11 @@ class App {
           this._updateAll();
           if (this.els.asmFollowPc.checked) this._ensureVisible(this.cpu.pc);
         }
+        break;
+      case '/':
+      case '?':
+        e.preventDefault();
+        this._openHelp();
         break;
     }
   }
@@ -2217,6 +2236,7 @@ class App {
       (addr, val) => this.mmu.writeByte(addr, val)
     );
     this.plotter.reset();
+    this.plotter.mmu = this.mmu;
     this.breakpoints.clear();
     this._resetState();
     this._rebuildDisasm(0);
@@ -2340,6 +2360,7 @@ class App {
         (addr, val) => this.mmu.writeByte(addr, val)
       );
       this.plotter.reset();
+    this.plotter.mmu = this.mmu;
       this.breakpoints.clear();
       this._resetState();
       this._rebuildDisasm(loadAddr);
@@ -2425,7 +2446,6 @@ class App {
         const stepsPerTick = Math.max(1, Math.floor(speed / 30));
         for (let i = 0; i < stepsPerTick; i++) {
           if (this.cpu.halt) break;
-          const pcBefore = this.cpu.pc;
           this.cpu.step();
           this._syncPlotter();
           if (this.breakpoints.has(this.cpu.pc)) {
@@ -2446,7 +2466,6 @@ class App {
       }
       for (let i = 0; i < BATCH; i++) {
         if (this.cpu.halt) break;
-        const pcBefore = this.cpu.pc;
         this.cpu.step();
         this._syncPlotter();
         if (this.breakpoints.has(this.cpu.pc)) {
@@ -2487,8 +2506,10 @@ class App {
     this._hlAddr = this.cpu.getHL();
     const writeAddr = this.mmu.lastWriteAddr;
     let targetAddr = -1;
-    if (writeAddr >= 0 && writeAddr < 0x10000) targetAddr = writeAddr;
-    else if (this._hlAddr >= 0 && this._hlAddr < 0x10000) targetAddr = this._hlAddr;
+    // Only auto-follow memory view when writes happen in RAM range (0x6000+)
+    // or when HL points to a non-zero address — prevents jump to 0 after reset
+    if (writeAddr >= 0x6000 && writeAddr < 0x10000) targetAddr = writeAddr;
+    else if (this._hlAddr > 0 && this._hlAddr < 0x10000) targetAddr = this._hlAddr;
     if (targetAddr >= 0) {
       this.memScrollAddr = targetAddr & 0xfff0;
       this.els.memAddr.value = this.memScrollAddr.toString(16).padStart(4,'0').toUpperCase();
@@ -2572,7 +2593,7 @@ class App {
       a += insn.size;
     }
     this._asmLastAddr = this.disasmCache[this.disasmCache.length - 1].addr;
-    this._renderDisasm(before);
+    this._renderDisasm();
   }
   _prependDisasm() {
     if (!this.disasmCache.length) return;
@@ -2721,39 +2742,57 @@ class App {
     const lineHeight = 17;
     const rowIndex = Math.floor(scrollTop / lineHeight);
     const newAddr = rowIndex * 16;
-    if (newAddr !== this.memScrollAddr && newAddr >= 0 && newAddr <= 0xfff0) {
-      this.memScrollAddr = newAddr;
-      this.els.memAddr.value = newAddr.toString(16).padStart(4,'0').toUpperCase();
-      this._updateMemoryDump(newAddr);
+    if (newAddr >= 0 && newAddr <= 0xfff0) {
+      // Only re-render if address changed by more than 1 row (16 bytes)
+      // — prevents cascade from programmatic scrollTop settling
+      const diff = Math.abs(newAddr - this.memScrollAddr);
+      if (diff >= 16) {
+        this.memScrollAddr = newAddr;
+        this.els.memAddr.value = newAddr.toString(16).padStart(4,'0').toUpperCase();
+        this._updateMemoryDump(newAddr);
+      }
     }
   }
   _updateMemoryDump(addr) {
     const dump = this.els.memDump;
     const container = this.els.memContainer;
     if (!dump || !container) return;
-    // Guard: prevent recursion when we set scrollTop programmatically
     if (this._memUpdating) return;
     this._memUpdating = true;
     this.memScrollAddr = addr & 0xfff0;
-    // Set virtual scroll height FIRST, then scroll position
+
     const totalRows = 0x10000 / 16; // 4096 rows
     const lineHeight = 17;
-    container.style.height = (totalRows * lineHeight) + 'px';
-    container.style.position = 'relative';
-    // Now scroll to the new address (center it in view)
+
+    // Ensure spacer exists for scroll extent
+    let spacer = container.querySelector('.mem-spacer');
+    if (!spacer) {
+      spacer = document.createElement('div');
+      spacer.className = 'mem-spacer';
+      spacer.style.cssText = 'height:1px;pointer-events:none';
+      container.insertBefore(spacer, dump);
+    }
+    spacer.style.height = (totalRows * lineHeight) + 'px';
+
     const targetRow = this.memScrollAddr / 16;
-    const visRows = Math.ceil((container.clientHeight || 300) / 17);
-    container.scrollTop = Math.max(0, (targetRow - visRows / 2) * 17);
-    // Render visible rows
+    const visHeight = container.clientHeight || 200;
+    // Scroll to exact target row — NO centering offset.
+    // Centering (targetRow - visRows/2) causes cascade: the read-back scrollTop
+    // gives a different address, _onMemScroll fires again, another update → loop.
+    // Exact row ensures scrollTop → rowIndex → newAddr round-trips correctly.
+    container.scrollTop = Math.max(0, targetRow * lineHeight);
+
+    // Calculate visible rows from scroll position (container, now scrollable)
     const scrollTop = container.scrollTop || 0;
-    const visibleHeight = container.clientHeight || 300;
-    const firstRow = Math.max(0, Math.floor(scrollTop / lineHeight) - 2);
-    const lastRow = Math.min(totalRows - 1, Math.ceil((scrollTop + visibleHeight) / lineHeight) + 2);
+    const firstRow = Math.max(0, Math.floor(scrollTop / lineHeight));
+    const lastRow = Math.min(totalRows - 1, Math.ceil((scrollTop + visHeight) / lineHeight));
+
+    // Position the dump
     dump.style.position = 'absolute';
     dump.style.top = (firstRow * lineHeight) + 'px';
-    dump.innerHTML = '';
     dump.style.width = '100%';
-    const regBase = 0xe000;
+    dump.innerHTML = '';
+
     const ramStart = 0x6000;
     const ramEnd = 0x63ff;
     for (let r = firstRow; r <= lastRow; r++) {
@@ -2812,6 +2851,7 @@ class App {
     }
     this._memUpdating = false;
   }
+
   _editMemoryByte(byteSpan) {
     if (byteSpan.classList.contains('editing')) return;
     if (this.editingByte) {
@@ -3320,7 +3360,96 @@ class App {
     reader.readAsText(file);
     event.target.value = '';
   }
-}
+  /* ═══════════════════════════════════════════════════════════════
+   * Theme management
+   * ═══════════════════════════════════════════════════════════════ */
+  _applyTheme(theme) {
+    const root = document.documentElement;
+    if (theme === 'light') {
+      root.dataset.theme = 'light';
+    } else {
+      delete root.dataset.theme; // default dark
+    }
+    // Persist
+    if (this.settings) {
+      this.settings.config.theme = theme === 'light' ? 'light' : 'dark';
+      this.settings.save();
+    }
+  }
+  /* ═══════════════════════════════════════════════════════════════
+   * Help overlay
+   * ═══════════════════════════════════════════════════════════════ */
+  _openHelp() {
+    if (document.getElementById('help-overlay')) return;
+    const div = document.createElement('div');
+    div.id = 'help-overlay';
+    div.innerHTML = `
+      <div id="help-panel">
+        <div id="help-header">
+          <h2>Подсказка</h2>
+          <button class="help-dismiss" id="help-close">✕ Закрыть</button>
+        </div>
+        <div id="help-body">
+          <section>
+            <h3>Клавиатурные сокращения</h3>
+            <table>
+              <tr><td><kbd>Space</kbd> / <kbd>→</kbd></td><td>Step (шаг)</td></tr>
+              <tr><td><kbd>R</kbd></td><td>Reset (сброс CPU)</td></tr>
+              <tr><td><kbd>F5</kbd></td><td>Run / Pause (пуск / пауза)</td></tr>
+              <tr><td><kbd>B</kbd></td><td>Breakpoint at PC (точка останова)</td></tr>
+              <tr><td><kbd>J</kbd></td><td>Jump PC к адресу под курсором</td></tr>
+              <tr><td><kbd>?</kbd> / <kbd>/</kbd></td><td>Эта подсказка</td></tr>
+              <tr><td><kbd>Esc</kbd></td><td>Закрыть подсказку / настройки</td></tr>
+            </table>
+          </section>
+          <section>
+            <h3>Мышь</h3>
+            <table>
+              <tr><td>Клик по регистру</td><td>Редактировать значение</td></tr>
+              <tr><td>Клик по флагу</td><td>Переключить флаг</td></tr>
+              <tr><td>Клик по строке дизассемблера</td><td>Toggle breakpoint</td></tr>
+              <tr><td>Двойной клик по строке дизассемблера</td><td>Jump PC</td></tr>
+              <tr><td>Клик по байту памяти</td><td>Редактировать байт</td></tr>
+              <tr><td>Клик по холсту плоттера</td><td>Нет действия (только просмотр)</td></tr>
+            </table>
+          </section>
+          <section>
+            <h3>Файлы</h3>
+            <table>
+              <tr><td>📂 Загрузка ROM</td><td>firmware.bin (24KB) или 3×8KB чипа</td></tr>
+              <tr><td>💾 Save Session</td><td>CPU + RAM + breakpoints + plotter</td></tr>
+              <tr><td>📂 Load HPGL</td><td>HPGL-файл (прямой рендер или через UART)</td></tr>
+            </table>
+          </section>
+          <section>
+            <h3>Советы</h3>
+            <table>
+              <tr><td>HLT</td><td>CPU остановлен. Нажми R для Reset</td></tr>
+              <tr><td>Run без прошивки</td><td>Загрузи firmware.bin через 📂 или настройки</td></tr>
+              <tr><td>Скорость</td><td>Slider от ∞ до 1 MHz</td></tr>
+            </table>
+          </section>
+        </div>
+      </div>`;
+    document.body.appendChild(div);
+    // Bind close
+    const closeBtn = div.querySelector('#help-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => this._closeHelp());
+    div.addEventListener('click', (e) => { if (e.target === div) this._closeHelp(); });
+    const onKey = (e) => { if (e.key === 'Escape') { this._closeHelp(); } };
+    this._helpKeyHandler = onKey;
+    document.addEventListener('keydown', onKey);
+  }
+  _closeHelp() {
+    if (this._helpKeyHandler) {
+      document.removeEventListener('keydown', this._helpKeyHandler);
+      this._helpKeyHandler = null;
+    }
+    const el = document.getElementById('help-overlay');
+    if (el) el.remove();
+  }
+  }
+
 /* ═══════════════════════════════════════════════════════════════
  * Startup
  * ═══════════════════════════════════════════════════════════════ */
@@ -3374,6 +3503,7 @@ async function tryAutoLoadROMs() {
   }
   console.log('[AFTOGRAF] No firmware found — waiting for manual load');
 }
+tryAutoLoadROMs();
 
 
 

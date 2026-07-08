@@ -1,4 +1,22 @@
+# Python
 __pycache__/
 *.pyc
-.DS_Store
+*.pyo
+
+# Build artifacts
 a.out
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs & temp
+log/
+*.log
+
+# User data (sessions, screenshots, test files, local scripts)
+*.json
+*.png
+*.hpgl
+ruserver.sh
