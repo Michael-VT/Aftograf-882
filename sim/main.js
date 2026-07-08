@@ -755,8 +755,8 @@ class App {
     this.hpglCurrent = 0;
     this.hpglCmdText = '';
     this.hpglCmds = [];
+    this._hpglRefSegments = []; // reference line segments for comparison
     this._asmHoverAddr = null;
-    this._hpglPaused = false;
     this._memUpdating = false;
     this._cacheDOM();
     this._bindEvents();
@@ -898,7 +898,7 @@ class App {
     if (this.els.memContainer) this.els.memContainer.addEventListener('scroll', () => this._onMemScroll());
     this._setupRegisterEditing();
     this._setupUSARTTerminal();
-    if (this.els.plotterClear) this.els.plotterClear.addEventListener('click', () => { this.plotter.clearLines(); this._renderPlotterCanvas(); });
+    if (this.els.plotterClear) this.els.plotterClear.addEventListener('click', () => { this.plotter.clearLines(); this._hpglRefSegments = []; this._renderPlotterCanvas(); });
     if (this.els.plotterAutofit) this.els.plotterAutofit.addEventListener('click', () => this._renderPlotterCanvas(true));
     if (this.els.btnSaveSession) this.els.btnSaveSession.addEventListener('click', () => this._saveSession());
     if (this.els.btnLoadSession) this.els.btnLoadSession.addEventListener('click', () => this.els.sessionFileInput.click());
@@ -2164,6 +2164,22 @@ class App {
       ctx.beginPath(); ctx.moveTo(x, margin); ctx.lineTo(x, h - margin); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(margin, y); ctx.lineTo(w - margin, y); ctx.stroke();
     }
+    // Draw reference overlay (HPGL ideal render) if available
+    const showRef = document.getElementById('hpgl-ref-mode')?.checked;
+    if (showRef && this._hpglRefSegments.length > 0) {
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+      for (const seg of this._hpglRefSegments) {
+        const c = PEN_COLORS[seg.pen] || PEN_COLORS[0];
+        ctx.strokeStyle = c.stroke;
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.moveTo(sx(seg.x1), sy(seg.y1));
+        ctx.lineTo(sx(seg.x2), sy(seg.y2));
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
     // Draw finalized lines
     ctx.lineWidth = 2;
     ctx.lineCap = 'round';
@@ -2266,6 +2282,32 @@ class App {
         this.hpglTotal = coords.length;
         this.hpglCurrent = 0;
         // Check mode
+        // Build reference segments (original coords, will be scaled during render)
+        this._hpglRefSegments = [];
+        let refPenDown = false;
+        let refPenNum = 0;
+        let refX = 0, refY = 0;
+        for (const pt of coords) {
+          if (pt.cmd === 'PD' && refPenDown) {
+            if (this._hpglRefSegments.length > 0) {
+              const last = this._hpglRefSegments[this._hpglRefSegments.length - 1];
+              if (last.pen === refPenNum) {
+                last.x2 = pt.x; last.y2 = pt.y;
+              } else {
+                this._hpglRefSegments.push({ x1: refX, y1: refY, x2: pt.x, y2: pt.y, pen: refPenNum });
+              }
+            } else {
+              this._hpglRefSegments.push({ x1: refX, y1: refY, x2: pt.x, y2: pt.y, pen: refPenNum });
+            }
+          } else if (pt.cmd === 'PD' && !refPenDown) {
+            refPenDown = true;
+            this._hpglRefSegments.push({ x1: refX, y1: refY, x2: pt.x, y2: pt.y, pen: refPenNum });
+          } else if (pt.cmd === 'PU') {
+            refPenDown = false;
+          }
+          refX = pt.x; refY = pt.y;
+          if (pt.cmd === 'SP') refPenNum = pt.pen;
+        }
         const uartMode = this.els.hpglUartMode?.checked;
         if (uartMode) {
           // UART mode: send HPGL as raw text to USART, CPU runs firmware
