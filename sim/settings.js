@@ -27,6 +27,7 @@ export const DEFAULTS = {
   },
   theme: 'dark',
   dip: [false, false, false, false],
+  sound: 'visual',  // 'off', 'visual', 'audio'
   custom: [],
 };
 
@@ -51,9 +52,8 @@ export class SettingsManager {
     const cfg = {
       theme: saved.theme === 'light' ? 'light' : 'dark',
       dip: Array.isArray(saved.dip) ? saved.dip.map(Boolean) : [false, false, false, false],
-      chips: (saved.chips || []).length === 3
-        ? saved.chips.map((c, i) => ({ ...DEFAULTS.chips[i], ...c }))
-        : DEFAULTS.chips.map(c => ({ ...c })),
+      sound: ['off', 'visual', 'audio'].includes(saved.sound) ? saved.sound : 'visual',
+      chips: (saved.chips || []).length === 3,
       vars: { ...DEFAULTS.vars },
       custom: Array.isArray(saved.custom) ? saved.custom.map(c => ({ ...c })) : [],
     };
@@ -213,6 +213,20 @@ export class SettingsManager {
                 <option value="light" ${cfg.theme==='light'?'selected':''}>Светлая (дневная)</option>
               </select>
               <label class="settings-hint">Применяется сразу после закрытия настроек</label>
+            </div>
+          </section>
+
+          <!-- Звук -->
+          <section class="settings-section">
+            <h3>Звук</h3>
+            <div class="settings-row">
+              <label for="settings-sound">Режим:</label>
+              <select id="settings-sound" class="cfg-sound-select" style="background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-family:var(--font-mono);font-size:12px">
+                <option value="off" ${cfg.sound==='off'?'selected':''}>Выключен</option>
+                <option value="visual" ${cfg.sound==='visual'?'selected':''}>Только индикатор</option>
+                <option value="audio" ${cfg.sound==='audio'?'selected':''}>Индикатор + звук</option>
+              </select>
+              <label class="settings-hint">Зуммер PIT OUT1. Применяется сразу после закрытия настроек</label>
             </div>
           </section>
 

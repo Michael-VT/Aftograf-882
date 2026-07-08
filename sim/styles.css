@@ -884,3 +884,13 @@ section h2 {
   font-size: 9px;
   color: var(--text-dim);
 }
+.buzzer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+.buzzer-icon {
+  font-size: 16px;
+  line-height: 1;
+}

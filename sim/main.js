@@ -172,6 +172,11 @@ class PIT8253 {
       initial: c.initial,
     }));
   }
+  /** Buzzer active: counter 1 in mode 3 (square wave) with non-zero reload */
+  isBuzzerActive() {
+    const c1 = this.counters[1];
+    return c1.mode === 3 && c1.initial > 0;
+  }
 }
 /**
  * КР580ВВ51А (i8251) — USART with terminal I/O and XOn-XOff.
@@ -1323,6 +1328,9 @@ class App {
       this.settings.config.dip[idx] = cb.checked;
     });
     this._syncDIP();
+    // Read sound mode
+    const soundEl = document.getElementById('settings-sound');
+    if (soundEl) this.settings.config.sound = soundEl.value;
     this.settings.save();
     overlay.remove();
   }
@@ -1965,15 +1973,20 @@ class App {
     const inp = this.editingByte.input;
     if (inp) inp.blur();
   }
-  /* ═══════════════════════════════════════════════════════════════
-   * I/O panel
-   * ═══════════════════════════════════════════════════════════════ */
   _updateIO() {
     const panel = this.els.ioPanel;
     const pc = this.ppi1.portC;
     const ledOn = (bit) => (pc & (1 << bit)) ? 'led-on' : 'led-off';
     const ls = this.plotter;
+    const buzActive = this.pit.isBuzzerActive();
     panel.innerHTML = `
+      <div class="io-block">
+        <div class="io-name">Зуммер (PIT OUT1)</div>
+        <div class="buzzer-row">
+          <span class="buzzer-icon">${buzActive ? '🔊' : '🔇'}</span>
+          <span class="io-reg">CNT1: <span class="io-reg-val">${this.pit.counters[1].val.toString(16).padStart(4,'0').toUpperCase()}</span> mode=${this.pit.counters[1].mode}</span>
+        </div>
+      </div>
       <div class="io-block">
         <div class="io-name">Светодиоды (PIO1.PC2-PC5)</div>
         <div class="led-row">
