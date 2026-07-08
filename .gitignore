@@ -20,3 +20,6 @@ log/
 *.png
 *.hpgl
 ruserver.sh
+
+# Project docs (manuals, schematics, software images)
+docs/
