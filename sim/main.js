@@ -2628,7 +2628,7 @@ window.addEventListener('unhandledrejection', (e) => {
   console.error('[AFTOGRAF] Unhandled Promise:', e.reason);
 });
 console.log('[AFTOGRAF] Starting App...');
-const app = new App();
+window.aftograf = new App();
 console.log('[AFTOGRAF] App initialized');
 // Auto-load ROMs from server if served
 async function tryAutoLoadROMs() {
@@ -2644,23 +2644,23 @@ async function tryAutoLoadROMs() {
       const data = new Uint8Array(buf);
       console.log('[AFTOGRAF] Loaded', url, '—', data.length, 'bytes');
       if (data.length === 0x6000) {
-        app.mmu.loadROM(data, 0x0000);
-        app.romLoaded = true;
-        app.cpu = app._makeCPU ? app._makeCPU() : new CPU8080(
-          (addr) => app.mmu.readByte(addr),
-          (addr, val) => app.mmu.writeByte(addr, val)
+        aftograf.mmu.loadROM(data, 0x0000);
+        aftograf.romLoaded = true;
+        aftograf.cpu = aftograf._makeCPU ? aftograf._makeCPU() : new CPU8080(
+          (addr) => aftograf.mmu.readByte(addr),
+          (addr, val) => aftograf.mmu.writeByte(addr, val)
         );
-        app.breakpoints.clear();
-        app._resetState();
+        aftograf.breakpoints.clear();
+        aftograf._resetState();
         console.log('[AFTOGRAF] ROM[0..7] =',
-          Array.from({length:8}, (_,i) => app.mmu.peek(i).toString(16).padStart(2,'0')).join(' '));
-        app._rebuildDisasm(0);
-        app._updateAll();
+          Array.from({length:8}, (_,i) => aftograf.mmu.peek(i).toString(16).padStart(2,'0')).join(' '));
+        aftograf._rebuildDisasm(0);
+        aftograf._updateAll();
         // Log first cache entry
-        if (app.disasmCache.length > 0) {
-          console.log('[DASM] cache[0] addr=$' + app.disasmCache[0].addr.toString(16) + ' mnem="' + app.disasmCache[0].mnemonic + '"');
+        if (aftograf.disasmCache.length > 0) {
+          console.log('[DASM] cache[0] addr=$' + aftograf.disasmCache[0].addr.toString(16) + ' mnem="' + aftograf.disasmCache[0].mnemonic + '"');
         }
-        app._setLoadStatus(`Авто-загрузка: firmware.bin (${(data.length/1024).toFixed(0)}KB)`, 'ok');
+        aftograf._setLoadStatus(`Авто-загрузка: firmware.bin (${(data.length/1024).toFixed(0)}KB)`, 'ok');
         return;
       } else {
         console.log('[AFTOGRAF] Unexpected firmware size:', data.length);
