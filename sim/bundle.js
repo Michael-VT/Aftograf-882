@@ -2584,7 +2584,7 @@ class App {
     this.plotter.syncFromMemory();
     this.plotter.updateStepper('x', this.ppi1.portA);
     this.plotter.updateStepper('y', this.ppi1.portB);
-    this.plotter.setPen(this.ppi2.portA);
+    this.plotter.setPen(this.ppi2.portC);
     this.plotter.updatePosition();
     this.plotter.checkLimits();
   }
@@ -3059,11 +3059,12 @@ class App {
   _updatePlotterUI() {
     const set = (el, val) => { if (el) el.textContent = val; };
     set(this.els.plotterPos, `X: ${this.plotter.xPos} Y: ${this.plotter.yPos}`);
-    set(this.els.plotterPen, `Перо: ${this.plotter.penDown ? 'Вниз' : 'Вверх'}`);
-    set(this.els.plotterPenNum, `Перо #${this.plotter.penNum + 1}`);
     const c = PEN_COLORS[this.plotter.penNum] || PEN_COLORS[0];
-    set(this.els.plotterColor, c.name);
-    if (this.els.plotterColor) this.els.plotterColor.style.color = c.stroke;
+    set(this.els.plotterPen, `Перо: ${this.plotter.penDown ? '↓' : '↑'} #${this.plotter.penNum + 1}`);
+    if (this.els.plotterColor) {
+      this.els.plotterColor.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${c.stroke};margin-right:4px;vertical-align:middle"></span> ${c.name}`;
+      this.els.plotterColor.style.color = c.stroke;
+    }
     // HPGL progress
     if (this.hpglTotal > 0) {
       set(this.els.hpglProgress, `HPGL: ${this.hpglCurrent}/${this.hpglTotal}`);
@@ -3144,17 +3145,23 @@ class App {
       ctx.textAlign = 'center';
       ctx.font = '14px sans-serif';
       ctx.fillText('Ожидание команд плоттера…', w / 2, h / 2);
-      // Draw cursor at current position even before any lines
+      // Draw pen cursor at current position even before any lines
       if (this.plotter.xPos !== 0 || this.plotter.yPos !== 0) {
         const cx = w / 2 + this.plotter.xPos % w;
         const cy = h / 2 - this.plotter.yPos % h;
+        const penC = PEN_COLORS[this.plotter.penNum] || PEN_COLORS[0];
+        const penSize = 6;
+        ctx.globalAlpha = this.plotter.penDown ? 1 : 0.5;
+        ctx.fillStyle = penC.stroke;
         ctx.beginPath();
-        ctx.arc(Math.min(w-10, Math.max(10, cx)), Math.min(h-10, Math.max(10, cy)), 5, 0, Math.PI * 2);
-        ctx.fillStyle = this.plotter.penDown ? '#cc0000' : '#3366cc';
+        ctx.moveTo(cx - penSize, cy + penSize);
+        ctx.lineTo(cx, cy + penSize * 1.8);
+        ctx.lineTo(cx + penSize, cy + penSize);
+        ctx.lineTo(cx + penSize * 0.4, cy - penSize * 1.2);
+        ctx.lineTo(cx - penSize * 0.4, cy - penSize * 1.2);
+        ctx.closePath();
         ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
+        ctx.globalAlpha = 1;
       }
       return;
     }
@@ -3205,16 +3212,32 @@ class App {
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    // Current position marker
+    // Current position — draw as pen tip
     const cx = sx(this.plotter.xPos);
     const cy = sy(this.plotter.yPos);
+    const penC = PEN_COLORS[this.plotter.penNum] || PEN_COLORS[0];
+    const penSize = 7;
+    // Pen body (rectangle)
+    ctx.fillStyle = penC.stroke;
+    ctx.globalAlpha = this.plotter.penDown ? 1 : 0.5;
     ctx.beginPath();
-    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-    ctx.fillStyle = this.plotter.penDown ? '#cc0000' : '#3366cc';
+    ctx.moveTo(cx - penSize, cy + penSize);
+    ctx.lineTo(cx, cy + penSize * 1.8);
+    ctx.lineTo(cx + penSize, cy + penSize);
+    ctx.lineTo(cx + penSize * 0.4, cy - penSize * 1.2);
+    ctx.lineTo(cx - penSize * 0.4, cy - penSize * 1.2);
+    ctx.closePath();
+    ctx.fill();
+    // Pen tip (colored dot at nib)
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy - penSize * 1, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = penC.stroke;
     ctx.fill();
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1;
     ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 
 
