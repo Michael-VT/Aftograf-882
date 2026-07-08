@@ -390,7 +390,7 @@ const FLAG_Z   = 0x40;
 const FLAG_S   = 0x80;
 
 class CPU8080 {
-  constructor(readByte, writeByte) {
+  constructor(readByte, writeByte, inPort, outPort) {
     // Register file
     this.a = 0; this.b = 0; this.c = 0;
     this.d = 0; this.e = 0; this.h = 0; this.l = 0;
@@ -406,6 +406,9 @@ class CPU8080 {
     // Memory callbacks (injected by MMU)
     this.readByte = readByte;
     this.writeByte = writeByte;
+    // I/O port callbacks (separate from memory space)
+    this.inPort = inPort || ((port) => this.readByte(0xe000 | port));
+    this.outPort = outPort || ((port, val) => this.writeByte(0xe000 | port, val));
 
     // Build opcode table once
     this.optable = buildOpcodeTable(this);
@@ -970,19 +973,17 @@ function buildOpcodeTable(cpu) {
   });
 
   /* ─── SPHL ─── */
-  def(0xf9, 'SPHL', 5, 1, () => { cpu.sp = cpu.getHL(); });
-
-  /* ─── IN/OUT ─── */
   def(0xdb, 'IN $02', 10, 2, () => {
     const port = cpu.fetchByte();
-    cpu.a = cpu.readByte(0xe000 | port); // memory-mapped I/O via $E000-$E0FF
+    cpu.a = cpu.inPort(port);
     cpu.cycles += 3;
   });
   def(0xd3, 'OUT $02', 10, 2, () => {
     const port = cpu.fetchByte();
-    cpu.writeByte(0xe000 | port, cpu.a);
+    cpu.outPort(port, cpu.a);
     cpu.cycles += 3;
   });
+
 
   /* ─── EI/DI ─── */
   def(0xfb, 'EI', 4, 1, () => { cpu.ie = true; });
@@ -1762,10 +1763,7 @@ class App {
     this.uart = new USART8251();
     this.mmu = new MMU(this.ppi1, this.ppi2, this.pit, this.uart);
     this.mmu.onInvalidWrite = (addr, val) => this._onInvalidWrite(addr, val);
-    this.cpu = new CPU8080(
-      (addr) => this.mmu.readByte(addr),
-      (addr, val) => this.mmu.writeByte(addr, val)
-    );
+    this.cpu = this._makeCPU();
     // Keyboard matrix state (6 rows × 2 columns)
     this._keyState = Array.from({length: 6}, () => [false, false]);
     // PPI1 read callbacks — keyboard rows on port A, DIP on port B
@@ -1815,6 +1813,27 @@ class App {
     this._setupPlotterResize();
     this._applyTheme(this.settings.config.theme);
     this._syncDIP();
+  }
+  /** Create a CPU8080 instance with proper I/O port routing.
+   *  I/O ports are separate from memory space on the real 8080.
+   *  Known ports: $19=USART data, $28=USART status/ctrl.
+   *  Other ports fall back to memory-mapped I/O at $E000+port. */
+  _makeCPU() {
+    const mmu = this.mmu;
+    return new CPU8080(
+      (addr) => mmu.readByte(addr),
+      (addr, val) => mmu.writeByte(addr, val),
+      (port) => {
+        if (port === 0x19) return this.uart.read(0);
+        if (port === 0x28) return this.uart.read(1);
+        return mmu.readByte(0xe000 | port);
+      },
+      (port, val) => {
+        if (port === 0x19) { this.uart.write(0, val); return; }
+        if (port === 0x28) { this.uart.write(1, val); return; }
+        mmu.writeByte(0xe000 | port, val);
+      }
+    );
   }
   _cacheDOM() {
     this.$ = (id) => document.getElementById(id);
@@ -2287,10 +2306,7 @@ class App {
       this._setLoadStatus(`Загружено ${Math.min(sorted.length, 3)} чипа(ов)`, 'ok');
     }
     this.romLoaded = true;
-    this.cpu = new CPU8080(
-      (addr) => this.mmu.readByte(addr),
-      (addr, val) => this.mmu.writeByte(addr, val)
-    );
+    this.cpu = this._makeCPU();
     this.plotter.reset();
     this.plotter.mmu = this.mmu;
     this.breakpoints.clear();
@@ -2417,10 +2433,7 @@ class App {
       this.mmu.onInvalidWrite = (addr, val) => this._onInvalidWrite(addr, val);
       this.mmu.loadROM(data, loadAddr);
       this.romLoaded = true;
-      this.cpu = new CPU8080(
-        (addr) => this.mmu.readByte(addr),
-        (addr, val) => this.mmu.writeByte(addr, val)
-      );
+      this.cpu = this._makeCPU();
       this.plotter.reset();
     this.plotter.mmu = this.mmu;
       this.breakpoints.clear();
@@ -3613,7 +3626,7 @@ async function tryAutoLoadROMs() {
       if (data.length === 0x6000) {
         app.mmu.loadROM(data, 0x0000);
         app.romLoaded = true;
-        app.cpu = new CPU8080(
+        app.cpu = app._makeCPU ? app._makeCPU() : new CPU8080(
           (addr) => app.mmu.readByte(addr),
           (addr, val) => app.mmu.writeByte(addr, val)
         );

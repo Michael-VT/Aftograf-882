@@ -13,7 +13,7 @@ const FLAG_Z   = 0x40;
 const FLAG_S   = 0x80;
 
 export class CPU8080 {
-  constructor(readByte, writeByte) {
+  constructor(readByte, writeByte, inPort, outPort) {
     // Register file
     this.a = 0; this.b = 0; this.c = 0;
     this.d = 0; this.e = 0; this.h = 0; this.l = 0;
@@ -29,6 +29,9 @@ export class CPU8080 {
     // Memory callbacks (injected by MMU)
     this.readByte = readByte;
     this.writeByte = writeByte;
+    // I/O port callbacks (separate from memory space)
+    this.inPort = inPort || ((port) => this.readByte(0xe000 | port));
+    this.outPort = outPort || ((port, val) => this.writeByte(0xe000 | port, val));
 
     // Build opcode table once
     this.optable = buildOpcodeTable(this);
@@ -593,19 +596,17 @@ function buildOpcodeTable(cpu) {
   });
 
   /* ─── SPHL ─── */
-  def(0xf9, 'SPHL', 5, 1, () => { cpu.sp = cpu.getHL(); });
-
-  /* ─── IN/OUT ─── */
   def(0xdb, 'IN $02', 10, 2, () => {
     const port = cpu.fetchByte();
-    cpu.a = cpu.readByte(0xe000 | port); // memory-mapped I/O via $E000-$E0FF
+    cpu.a = cpu.inPort(port);
     cpu.cycles += 3;
   });
   def(0xd3, 'OUT $02', 10, 2, () => {
     const port = cpu.fetchByte();
-    cpu.writeByte(0xe000 | port, cpu.a);
+    cpu.outPort(port, cpu.a);
     cpu.cycles += 3;
   });
+
 
   /* ─── EI/DI ─── */
   def(0xfb, 'EI', 4, 1, () => { cpu.ie = true; });
