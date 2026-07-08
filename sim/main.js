@@ -36,8 +36,8 @@ class PPI8255 {
   }
   read(reg) {
     switch (reg) {
-      case 0: return this.portA;
-      case 1: return this.portB;
+      case 0: return this.onReadPortA ? this.onReadPortA() : this.portA;
+      case 1: return this.onReadPortB ? this.onReadPortB() : this.portB;
       case 2: return this.portC;
       case 3: return this.ctrl;
       default: return 0xff;
@@ -307,6 +307,21 @@ class Plotter {
     this.lastMemX = -1;
     this.lastMemY = -1;
     this.lastMemColor = -1;
+    // Limit switches — triggered when head reaches table edge
+    this.limitXmin = false;
+    this.limitXmax = false;
+    this.limitYmin = false;
+    this.limitYmax = false;
+    this.tableXmin = 0;
+    this.tableXmax = 17200;  // plotter working area (HPGL units)
+    this.tableYmin = 0;
+    this.tableYmax = 12200;
+  }
+  checkLimits() {
+    this.limitXmin = this.xPos <= this.tableXmin;
+    this.limitXmax = this.xPos >= this.tableXmax;
+    this.limitYmin = this.yPos <= this.tableYmin;
+    this.limitYmax = this.yPos >= this.tableYmax;
   }
   syncFromMemory() {
     const s = this.settings;
@@ -702,6 +717,21 @@ class App {
       (addr) => this.mmu.readByte(addr),
       (addr, val) => this.mmu.writeByte(addr, val)
     );
+    // Keyboard matrix state (6 rows × 2 columns)
+    this._keyState = Array.from({length: 6}, () => [false, false]);
+    // PPI1 read callbacks — keyboard rows on port A, DIP on port B
+    this.ppi1.onReadPortA = () => this._readKeyboard();
+    this.ppi1.onReadPortB = () => {
+      const dip = this.settings?.config?.dip;
+      let val = 0;
+      if (dip) for (let i = 0; i < 4; i++) if (dip[i]) val |= (1 << (4 + i));
+      // Inject limit switch bits into PB0-PB3
+      if (this.plotter.limitXmin) val |= 0x01;
+      if (this.plotter.limitXmax) val |= 0x02;
+      if (this.plotter.limitYmin) val |= 0x04;
+      if (this.plotter.limitYmax) val |= 0x08;
+      return val;
+    };
     this.plotter = new Plotter(this.mmu, this.settings);
     this.running = false;
     this.paused = false;
@@ -860,6 +890,15 @@ class App {
     this.uart.onRxInterrupt = () => { this.cpu.intr = true; };
     document.addEventListener('keydown', (e) => this._onKeyDown(e));
     window.addEventListener('resize', () => this._updatePlotterSize());
+    // Keyboard matrix buttons
+    document.querySelectorAll('.kbd-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const r = parseInt(btn.dataset.r);
+        const c = parseInt(btn.dataset.c);
+        this._keyState[r][c] = !this._keyState[r][c];
+        btn.classList.toggle('kbd-pressed');
+      });
+    });
     this._setupSplitter();
   }
   /* ═══════════════════════════════════════════════════════════════
@@ -1465,13 +1504,6 @@ class App {
     }
     this._updateAll();
   }
-  _syncPlotter() {
-    this.plotter.syncFromMemory();
-    this.plotter.updateStepper('x', this.ppi1.portA);
-    this.plotter.updateStepper('y', this.ppi1.portB);
-    this.plotter.setPen(this.ppi2.portA);
-    this.plotter.updatePosition();
-  }
   /** Sync DIP switch state to PIO1 port B bits PB4-PB7 and port C bits PC4-PC7 */
   _syncDIP() {
     const dip = this.settings?.config?.dip;
@@ -1482,6 +1514,30 @@ class App {
     }
     this.ppi1.portB = (this.ppi1.portB & 0x0f) | val;
     this.ppi1.portC = (this.ppi1.portC & 0x0f) | val;
+  }
+  /** Read keyboard matrix state for PPI1 port A.
+   *  Firmware scans by driving column bits (PC0-PC1) low and reading rows (PA0-PA5).
+   *  Returns row bits: bit N = 0 when key at (row N, active column) is pressed. */
+  _readKeyboard() {
+    const activeCol = (~this.ppi1.portC) & 0x03;
+    let rows = 0xff;
+    for (let c = 0; c < 2; c++) {
+      if (activeCol & (1 << c)) {
+        for (let r = 0; r < 6; r++) {
+          if (this._keyState[r][c]) rows &= ~(1 << r);
+        }
+      }
+    }
+    return rows;
+  }
+
+  _syncPlotter() {
+    this.plotter.syncFromMemory();
+    this.plotter.updateStepper('x', this.ppi1.portA);
+    this.plotter.updateStepper('y', this.ppi1.portB);
+    this.plotter.setPen(this.ppi2.portA);
+    this.plotter.updatePosition();
+    this.plotter.checkLimits();
   }
   _updateAll() {
     this._updateRegisters();
@@ -1902,7 +1958,29 @@ class App {
    * ═══════════════════════════════════════════════════════════════ */
   _updateIO() {
     const panel = this.els.ioPanel;
+    const pc = this.ppi1.portC;
+    const ledOn = (bit) => (pc & (1 << bit)) ? 'led-on' : 'led-off';
+    const ls = this.plotter;
     panel.innerHTML = `
+      <div class="io-block">
+        <div class="io-name">Светодиоды (PIO1.PC2-PC5)</div>
+        <div class="led-row">
+          <span class="led ${ledOn(2)}" title="Led1 (PC2)"></span>
+          <span class="led ${ledOn(3)}" title="Led2 (PC3)"></span>
+          <span class="led ${ledOn(4)}" title="Led3 (PC4)"></span>
+          <span class="led ${ledOn(5)}" title="Led4 (PC5)"></span>
+        </div>
+      </div>
+      <div class="io-block">
+        <div class="io-name">Концевые датчики</div>
+        <div class="limit-row">
+          <span class="limit ${ls.limitXmin?'limit-on':'limit-off'}">X←</span>
+          <span class="limit ${ls.limitXmax?'limit-on':'limit-off'}">X→</span>
+          <span class="limit ${ls.limitYmin?'limit-on':'limit-off'}">Y↓</span>
+          <span class="limit ${ls.limitYmax?'limit-on':'limit-off'}">Y↑</span>
+        </div>
+        <div class="io-reg">Поз: <span class="io-reg-val">X=${this.plotter.xPos} Y=${this.plotter.yPos}</span></div>
+      </div>
       <div class="io-block">
         <div class="io-name">Порт 8253 (таймер)</div>
         <div>${this.pit.counters.map((c,i) =>
