@@ -26,6 +26,7 @@ export const DEFAULTS = {
     PEN_COLOR:  { label: 'Pen color / num',  addr: 0x61e8, size: 1 },
   },
   theme: 'dark',
+  dip: [false, false, false, false],
   custom: [],
 };
 
@@ -49,6 +50,7 @@ export class SettingsManager {
   _merge(saved) {
     const cfg = {
       theme: saved.theme === 'light' ? 'light' : 'dark',
+      dip: Array.isArray(saved.dip) ? saved.dip.map(Boolean) : [false, false, false, false],
       chips: (saved.chips || []).length === 3
         ? saved.chips.map((c, i) => ({ ...DEFAULTS.chips[i], ...c }))
         : DEFAULTS.chips.map(c => ({ ...c })),
@@ -187,6 +189,20 @@ export class SettingsManager {
             </div>
           </section>
 
+
+          <!-- DIP-переключатели -->
+          <section class="settings-section">
+            <h3>Конфигурационные переключатели (DIP)</h3>
+            <div class="settings-row">
+              ${cfg.dip.map((v,i) => `
+                <label style="display:flex;align-items:center;gap:4px;font-size:12px;font-family:var(--font-mono)">
+                  <input type="checkbox" class="cfg-dip" data-idx="${i}" ${v?'checked':''}>
+                  ComCfg${i+1}
+                </label>
+              `).join('')}
+              <label class="settings-hint">Соответствуют PB4-PB7 на PIO1. Применяются сразу.</label>
+            </div>
+          </section>
           <!-- Тема оформления -->
           <section class="settings-section">
             <h3>Тема оформления</h3>

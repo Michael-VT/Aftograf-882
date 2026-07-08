@@ -28,6 +28,7 @@ const DEFAULTS = {
     PEN_COLOR:  { label: 'Pen color / num',  addr: 0x61e8, size: 1 },
   },
   theme: 'dark',
+  dip: [false, false, false, false],
   custom: [],
 };
 
@@ -51,6 +52,7 @@ class SettingsManager {
   _merge(saved) {
     const cfg = {
       theme: saved.theme === 'light' ? 'light' : 'dark',
+      dip: Array.isArray(saved.dip) ? saved.dip.map(Boolean) : [false, false, false, false],
       chips: (saved.chips || []).length === 3
         ? saved.chips.map((c, i) => ({ ...DEFAULTS.chips[i], ...c }))
         : DEFAULTS.chips.map(c => ({ ...c })),
@@ -189,6 +191,20 @@ class SettingsManager {
             </div>
           </section>
 
+
+          <!-- DIP-переключатели -->
+          <section class="settings-section">
+            <h3>Конфигурационные переключатели (DIP)</h3>
+            <div class="settings-row">
+              ${cfg.dip.map((v,i) => `
+                <label style="display:flex;align-items:center;gap:4px;font-size:12px;font-family:var(--font-mono)">
+                  <input type="checkbox" class="cfg-dip" data-idx="${i}" ${v?'checked':''}>
+                  ComCfg${i+1}
+                </label>
+              `).join('')}
+              <label class="settings-hint">Соответствуют PB4-PB7 на PIO1. Применяются сразу.</label>
+            </div>
+          </section>
           <!-- Тема оформления -->
           <section class="settings-section">
             <h3>Тема оформления</h3>
@@ -1768,6 +1784,7 @@ class App {
     this._updateIO();
     this._setupPlotterResize();
     this._applyTheme(this.settings.config.theme);
+    this._syncDIP();
   }
   _cacheDOM() {
     this.$ = (id) => document.getElementById(id);
@@ -2295,6 +2312,12 @@ class App {
       const offset = parseInt(raw, 16);
       if (!isNaN(offset)) this.settings.setChipOffset(idx, offset);
     });
+    // Read DIP switches
+    document.querySelectorAll('.cfg-dip').forEach(cb => {
+      const idx = parseInt(cb.dataset.idx);
+      this.settings.config.dip[idx] = cb.checked;
+    });
+    this._syncDIP();
     this.settings.save();
     overlay.remove();
   }
@@ -2497,6 +2520,17 @@ class App {
     this.plotter.updateStepper('y', this.ppi1.portB);
     this.plotter.setPen(this.ppi2.portA);
     this.plotter.updatePosition();
+  }
+  /** Sync DIP switch state to PIO1 port B bits PB4-PB7 and port C bits PC4-PC7 */
+  _syncDIP() {
+    const dip = this.settings?.config?.dip;
+    if (!dip) return;
+    let val = 0;
+    for (let i = 0; i < 4; i++) {
+      if (dip[i]) val |= (1 << (4 + i));
+    }
+    this.ppi1.portB = (this.ppi1.portB & 0x0f) | val;
+    this.ppi1.portC = (this.ppi1.portC & 0x0f) | val;
   }
   _updateAll() {
     this._updateRegisters();
