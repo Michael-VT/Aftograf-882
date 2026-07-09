@@ -1,5 +1,7 @@
 # Simulateur Débogueur Autograf-882
 
+![Simulateur Débogueur Autograf-882](images/Aftograf-882-Debuger.png)
+
 Un débogueur et simulateur interactif pour le traceur **Autograf-882**, un traceur à plat soviétique basé sur le CPU **K580IK80A** (clone de l'Intel 8080), fonctionnant entièrement dans le navigateur.
 
 Ce projet fournit un jumeau numérique complet du matériel d'origine : émulation CPU, entrées-sorties mappées en mémoire, désassembleur, simulation du traceur, terminal USART et chargeur de fichiers HPGL.

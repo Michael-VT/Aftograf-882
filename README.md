@@ -1,5 +1,7 @@
 # Autograf-882 Debug Simulator
 
+![Autograf-882 Debug Simulator](images/Aftograf-882-Debuger.png)
+
 An interactive browser-based debugger and simulator for the **Autograf-882** — a Soviet flatbed plotter (drafting machine) built around the **K580IK80A** CPU (a clone of the Intel 8080).
 
 This project provides a complete digital twin of the original hardware: CPU emulation, memory-mapped I/O, disassembler, plotter simulation, USART terminal, and HPGL file loader — all running in the browser with no server-side logic.

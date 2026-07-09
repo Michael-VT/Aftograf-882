@@ -1,5 +1,7 @@
 # Simulador Debugger Autograf-882
 
+![Simulador Debugger Autograf-882](images/Aftograf-882-Debuger.png)
+
 Um depurador e simulador interativo baseado em navegador para o **Autograf-882** — um plotter de mesa soviético construído em torno da CPU **K580IK80A** (um clone do Intel 8080).
 
 Este projeto fornece um gêmeo digital completo do hardware original: emulação de CPU, E/S mapeada em memória, desmontador, simulação de plotter, terminal USART e carregador de arquivos HPGL — tudo executado no navegador sem lógica de servidor.

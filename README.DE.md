@@ -1,5 +1,7 @@
 # Autograf-882 Debug-Simulator
 
+![Autograf-882 Debug-Simulator](images/Aftograf-882-Debuger.png)
+
 Ein interaktiver, browserbasierter Debugger und Simulator für den **Autograf-882** — einen sowjetischen Flachbett-Plotter mit der **K580IK80A** CPU (einem Klon des Intel 8080).
 
 Dieses Projekt bietet einen vollständigen digitalen Zwilling der Originalhardware: CPU-Emulation, speicherabbildende Ein-/Ausgabe, Disassembler, Plotter-Simulation, USART-Terminal und HPGL-Dateilader — alles im Browser ohne serverseitige Logik.
