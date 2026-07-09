@@ -312,19 +312,18 @@ class Plotter {
     this.lastMemX = -1;
     this.lastMemY = -1;
     this.lastMemColor = -1;
-    // Limit switches — triggered when head reaches table edge
     this.limitXmin = false;
     this.limitXmax = false;
     this.limitYmin = false;
     this.limitYmax = false;
+    this.limitPenUp = false;
+    this.limitPenDn = false;
     this.tableXmin = 0;
-    this.tableXmax = 17200;  // plotter working area (HPGL units)
+    this.tableXmax = 17200;
     this.tableYmin = 0;
     this.tableYmax = 12200;
-    this.limitYmax = false;
-    this.limitPenUp = false;   // pen mechanism at top (change position)
-    this.limitPenDn = false;   // pen mechanism at bottom (change position)
-    this.tableXmin = 0;
+  }
+  checkLimits() {
     this.limitXmin = this.xPos <= this.tableXmin;
     this.limitXmax = this.xPos >= this.tableXmax;
     this.limitYmin = this.yPos <= this.tableYmin;
@@ -426,6 +425,8 @@ class Plotter {
     this.lastMemPenState = -1;
     this.lastMemX = -1; this.lastMemY = -1;
     this.lastMemColor = -1;
+    this.limitXmin = false; this.limitXmax = false;
+    this.limitYmin = false; this.limitYmax = false;
     this.lines = [];
     this.currentSegment = null;
   }
@@ -1447,17 +1448,23 @@ class App {
   }
   step() {
     try {
-      if (!this.romLoaded) return;
-      if (this.cpu.halt) return;
+      const diag = document.getElementById('step-diag');
+      if (diag) diag.textContent = 'step() called';
+      if (!this.romLoaded) { if (diag) diag.textContent += ' → rom not loaded'; return; }
+      if (this.cpu.halt) { if (diag) diag.textContent += ' → CPU halted'; return; }
+      if (diag) diag.textContent += ' → executing';
       this.paused = true;
       this.running = false;
       this.cpu.step();
+      if (diag) diag.textContent += ' → cpu.step done, PC=' + this.cpu.pc.toString(16) + ' cycles=' + this.cpu.cycles;
       this._syncPlotter();
       this._updateAll();
       if (this.els.asmFollowPc && this.els.asmFollowPc.checked) {
         this._ensureVisible(this.cpu.pc);
       }
     } catch (e) {
+      const diag = document.getElementById('step-diag');
+      if (diag) diag.textContent = 'STEP ERROR: ' + e.message;
       console.error('[AFTOGRAF] step() error:', e);
     }
   }
