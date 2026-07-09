@@ -2509,26 +2509,19 @@ class App {
     this.cpu.reset();
     this.plotter.reset();
     this._updateAll();
-  }
   step() {
     try {
-      const diag = document.getElementById('step-diag');
-      if (diag) diag.textContent = 'step() called';
-      if (!this.romLoaded) { if (diag) diag.textContent += ' → rom not loaded'; return; }
-      if (this.cpu.halt) { if (diag) diag.textContent += ' → CPU halted'; return; }
-      if (diag) diag.textContent += ' → executing';
+      if (!this.romLoaded) return;
+      if (this.cpu.halt) return;
       this.paused = true;
       this.running = false;
       this.cpu.step();
-      if (diag) diag.textContent += ' → cpu.step done, PC=' + this.cpu.pc.toString(16) + ' cycles=' + this.cpu.cycles;
       this._syncPlotter();
       this._updateAll();
       if (this.els.asmFollowPc && this.els.asmFollowPc.checked) {
         this._ensureVisible(this.cpu.pc);
       }
     } catch (e) {
-      const diag = document.getElementById('step-diag');
-      if (diag) diag.textContent = 'STEP ERROR: ' + e.message;
       console.error('[AFTOGRAF] step() error:', e);
     }
   }
