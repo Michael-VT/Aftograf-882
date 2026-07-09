@@ -2509,6 +2509,7 @@ class App {
     this.cpu.reset();
     this.plotter.reset();
     this._updateAll();
+  }
   step() {
     try {
       if (!this.romLoaded) return;
