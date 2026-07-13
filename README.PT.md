@@ -3,10 +3,6 @@
 ![Autograf-882 — Dispositivo Original](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
 *O plotter Autograf-882 original*
 
-![Autograf-882 Debug Simulator](images/Avtograf8445-sh003.png)
-*Simulador debugger em ação (Rust/egui)*
-
-
 ## Recursos
 
 ### Emulação de CPU
@@ -39,6 +35,10 @@
 - **Modo passo**: ▶ Next / ▶▶ All / ⟲ Reset
 - **Desenhar até N**: inserir número do segmento
 - Barra de progresso, linha ativa destacada
+
+![Autograf-882 Debug Simulator](images/Avtograf8445-sh003.png)
+*Simulador debugger em ação (Rust/egui)*
+
 
 ## Compilar e Executar
 

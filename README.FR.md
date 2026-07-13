@@ -3,10 +3,6 @@
 ![Autograf-882 — Appareil d'Origine](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
 *Le traceur original Autograf-882*
 
-![Autograf-882 Debug Simulator](images/Avtograf8445-sh003.png)
-*Simulateur débogueur en action (Rust/egui)*
-
-
 ## Fonctionnalités
 
 ### Émulation CPU
@@ -39,6 +35,10 @@
 - **Mode pas à pas** : ▶ Next / ▶▶ All / ⟲ Reset
 - **Dessiner jusqu'à N** : saisir le numéro de segment
 - Barre de progression, ligne active surlignée
+
+![Autograf-882 Debug Simulator](images/Avtograf8445-sh003.png)
+*Simulateur débogueur en action (Rust/egui)*
+
 
 ## Compilation et Exécution
 
