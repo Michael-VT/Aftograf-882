@@ -1,4 +1,4 @@
-# Autograf-882 Debug Simulator v1.0.8
+# Autograf-882 Debug Simulator v1.0.10
 
 ![Autograf-882 Debug Simulator](images/Aftograf-882-Debuger.png)
 

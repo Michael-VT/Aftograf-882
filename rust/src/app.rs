@@ -93,6 +93,7 @@ pub struct AftografApp {
     pub mem_edit_addr: Option<u16>,
     pub mem_view_ver: u64,
     pub mem_edit_buf: String,
+    pub mem_scroll_to_row: Option<u16>,
     pub hl_addr: u16,
 
     // USART
@@ -171,6 +172,7 @@ impl AftografApp {
             mem_edit_buf: String::new(),
             hl_addr: 0,
             usart_hex_input: String::new(),
+            mem_scroll_to_row: None,
             usart_log: String::new(),
             hpgl: HPGL::new(),
             settings: Settings::new(),
@@ -458,7 +460,7 @@ impl AftografApp {
     fn ui_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Aftograf-882 Debuger");
-            ui.label("v1.0.8".to_string());
+            ui.label("v1.0.10".to_string());
 
             ui.separator();
 
@@ -834,7 +836,7 @@ impl AftografApp {
                                 {
                                     if let Ok(data) = std::fs::read_to_string(&path) {
                                         self.hpgl.parse(&data);
-                                        self.plotter.lines.clear();
+                                        self.plotter.reset();
                                         self.hpgl.current = self.hpgl.generated_segments.len();
                                         self.hpgl.total_coords = self.hpgl.generated_segments.len();
                                         self.plotter.lines.extend(self.hpgl.generated_segments.clone());
@@ -967,9 +969,7 @@ impl AftografApp {
                         }
                     });
             });
-        ui.separator();
-
-        // ── Memory (bottom 45%) ──
+        // ── Memory (virtual-scroll 64KB) ──
         ui.horizontal(|ui| {
             ui.label("Memory");
             if self.mem_search.is_empty() {
@@ -978,43 +978,73 @@ impl AftografApp {
             if ui.add(egui::TextEdit::singleline(&mut self.mem_search).desired_width(60.0).font(egui::TextStyle::Monospace)).lost_focus() {
                 if let Ok(addr) = u16::from_str_radix(self.mem_search.trim_start_matches("$").trim_start_matches("0x"), 16) {
                     self.mem_scroll_addr = addr & 0xFFF0;
-                    self.mem_view_ver += 1;
+                    self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
                 }
             }
             if ui.button("Go").clicked() {
                 if let Ok(addr) = u16::from_str_radix(self.mem_search.trim_start_matches("$").trim_start_matches("0x"), 16) {
                     self.mem_scroll_addr = addr & 0xFFF0;
-                    self.mem_view_ver += 1;
+                    self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
                 }
             }
             if ui.button("◀").clicked() {
                 self.mem_scroll_addr = self.mem_scroll_addr.saturating_sub(0x100);
                 self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                self.mem_view_ver += 1;
+                self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
             }
             if ui.button("▶").clicked() {
                 self.mem_scroll_addr = self.mem_scroll_addr.saturating_add(0x100);
                 self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                self.mem_view_ver += 1;
+                self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
             }
             if ui.button("HL").clicked() {
                 self.mem_scroll_addr = self.cpu.get_hl() & 0xFFF0;
                 self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                self.mem_view_ver += 1;
+                self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
             }
             if ui.button("↺").clicked() { }
         });
         if !self.mem_warning.is_empty() {
             ui.colored_label(egui::Color32::RED, &self.mem_warning);
         }
-        let num_rows = 64u16;
-        let start_addr = self.mem_scroll_addr;
+
+        // ── Virtual-scroll 64KB memory viewer ──
+        const ROW_H: f32 = 18.0;
+        const TOTAL_ROWS: usize = 4096; // 65536 / 16
+        let total_height = TOTAL_ROWS as f32 * ROW_H;
+
         egui::ScrollArea::vertical()
-            .id_source(("mem_scroll", self.mem_view_ver >> 1))
-            .show(ui, |ui| {
-                for r in 0..num_rows {
-                    let base = start_addr.wrapping_add(r * 16);
-                    let addr_str = format!("${base:04X}");
+            .id_source("mem_scroll_64kb")
+            .auto_shrink([false; 2])
+            .show_viewport(ui, |ui, viewport| {
+                ui.set_min_height(total_height);
+
+                // Visible row range (viewport gives visible rect in content coords)
+                let first_visible = (viewport.min.y / ROW_H).max(0.0).floor() as usize;
+                let vis_count = ((viewport.height() / ROW_H).ceil() as usize) + 2;
+                let last_visible = (first_visible + vis_count).min(TOTAL_ROWS);
+
+                if let Some(target_row) = self.mem_scroll_to_row.take() {
+                    let target_y = target_row as f32 * ROW_H;
+                    let rect = egui::Rect::from_min_size(egui::pos2(0.0, target_y), egui::vec2(1.0, ROW_H));
+                    ui.scroll_to_rect(rect, Some(egui::Align::TOP));
+                }
+
+                // Update scroll addr from scroll position
+                self.mem_scroll_addr = (first_visible as u16) * 16;
+
+                // Spacer before first visible row
+                if first_visible > 0 {
+                    let cursor_y = ui.cursor().min.y;
+                    let target_y = first_visible as f32 * ROW_H;
+                    if target_y > cursor_y {
+                        ui.add_space(target_y - cursor_y);
+                    }
+                }
+
+                // Render visible rows
+                for r in first_visible..last_visible {
+                    let base = (r as u16) * 16;
                     let is_rom = base < 0x6000;
                     let is_ram = (0x6000..=0x67FF).contains(&base);
                     let addr_color = if is_rom { egui::Color32::from_rgb(101, 67, 33) }
@@ -1025,7 +1055,7 @@ impl AftografApp {
                         else if (0xEC00..0xF000).contains(&base) { egui::Color32::from_rgb(150, 100, 200) }
                         else { egui::Color32::WHITE };
                     ui.horizontal(|ui| {
-                        ui.colored_label(addr_color, addr_str);
+                        ui.colored_label(addr_color, format!("${base:04X}"));
                         for c in 0..16u16 {
                             let byte_addr = base.wrapping_add(c);
                             let v = self.mmu.peek(byte_addr);
@@ -1076,6 +1106,13 @@ impl AftografApp {
                         }
                         ui.add(egui::Label::new(egui::RichText::new(&ascii_str).monospace()));
                     });
+                }
+
+                // Spacer after last visible row
+                let last_y = last_visible as f32 * ROW_H;
+                let remaining = total_height - last_y;
+                if remaining > 0.0 {
+                    ui.add_space(remaining);
                 }
             });
     }
@@ -1135,7 +1172,7 @@ impl AftografApp {
                         {
                             if let Ok(data) = std::fs::read_to_string(&path) {
                                 self.hpgl.parse(&data);
-                                self.plotter.lines.clear();
+                                self.plotter.reset();
                                 self.hpgl.current = self.hpgl.generated_segments.len();
                                 self.hpgl.total_coords = self.hpgl.generated_segments.len();
                                 self.plotter.lines.extend(self.hpgl.generated_segments.clone());

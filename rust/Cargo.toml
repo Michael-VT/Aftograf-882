@@ -1,6 +1,6 @@
 [package]
 name = "aftograf"
-version = "1.0.8"
+version = "1.0.10"
 edition = "2021"
 description = "Aftograf-882 Debug Simulator — native macOS GUI"
 authors = ["Aftograf Team"]
