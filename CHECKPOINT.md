@@ -1,33 +1,45 @@
 # Autograf-882 Debug Simulator — Checkpoint
 
-**Date:** 2026-07-08  
-**State:** STABLE — v0.0.7, all bugs fixed, memory view working, help system + theme toggle.
+**Date:** 2026-07-13  
+**State:** STABLE — v1.0.10, clippy-clean, full 64KB memory scroll, HPGL fixes.
+
+## Version Convention
+
+**Each fix bumps the PATCH version** (e.g. 1.0.8 → 1.0.9 → 1.0.10).  
+Bump until all known bugs are resolved and the simulator is stable.
+
 
 ## Project Structure
 
 ```
 ./
-├── sim/                          ← Browser debug simulator
-│   ├── bundle.js                 Single-file JS (built from 4 modules)
-│   ├── build.js                  Bundle concatenation script
-│   ├── settings.js               SettingsManager + defaults + renderPanel()
-│   ├── memory.js                 MMU: ROM(24KB) + RAM(1KB) + I/O
-│   ├── cpu8080.js                Full 8080/К580ИК80 emulator, 256 opcodes
-│   ├── main.js                   App controller — UI, plotter, disasm, I/O devices
-│   ├── index.html                Full 3-column layout with all panels
-│   ├── styles.css                Dark/light theme system + help overlay styles
-│   └── firmware.bin              24KB — concatenated 3x D2764A EPROMs
-├── disasm8080.py                 Python recursive disassembler
-├── autograf-882-disassembly.asm  Full listing (17792 lines)
-├── Autograf-882-*Chip*.bin       3× 8KB ROM dumps
-├── 01_Plotter-*-Schematic.pdf    Schematic (reverse-engineered)
-├── README.md                     Project docs (EN)
-├── README.RU.md                  Project docs (RU)
-├── README.PT.md                  Project docs (PT)
-├── README.UA.md                  Project docs (UA)
-├── README.FR.md                  Project docs (FR)
-├── README.DE.md                  Project docs (DE)
-└── CHECKPOINT.md                 This file
+├── rust/                          ← Native GUI (Rust/egui) — PRIMARY
+│   ├── Cargo.toml
+│   ├── Cargo.lock
+│   ├── build.rs                   Firmware embedder
+│   ├── TESTS.md                   Test documentation
+│   ├── src/
+│   │   ├── main.rs                Entry point
+│   │   ├── app.rs                 Main application (UI, stepping, callbacks)
+│   │   ├── cpu.rs                 Intel 8080 CPU emulator
+│   │   ├── memory.rs              MMU: ROM(24KB) + RAM(2KB) + I/O
+│   │   ├── disasm.rs              Disassembler
+│   │   ├── plotter.rs             XY plotter simulation
+│   │   ├── hpgl.rs                HPGL parser
+│   │   ├── ppi8255.rs             K580VV55A (PPI)
+│   │   ├── pit8253.rs             K580VI53 (PIT)
+│   │   ├── usart8251.rs           K580VV51A (USART)
+│   │   ├── settings.rs            Configuration
+│   │   └── session.rs             Save/load state
+│   └── assets/firmware.bin        24KB firmware image
+├── sim/                           ← Browser debug simulator (legacy)
+│   ├── bundle.js
+│   ├── main.js, cpu8080.js, memory.js
+│   └── firmware.bin
+├── docs/                          ← Documentation & datasheets
+├── *.hpgl                         ← Sample HPGL plot files
+├── README.*.md                    ← Project docs (6 languages)
+└── CHECKPOINT.md                  ← This file
 ```
 
 ## Architecture (3-column layout)
