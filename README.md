@@ -1,6 +1,10 @@
 # Autograf-882 Debug Simulator v1.0.10
 
-![Autograf-882 Debug Simulator](images/Aftograf-882-Debuger.png)
+![Autograf-882 — Original Device](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
+*The original Autograf-882 flatbed plotter*
+
+![Autograf-882 Debug Simulator](images/Avtograf8445-sh003.png)
+*Debugger simulator in action (Rust/egui)*
 
 A native macOS debugger and simulator for the **Autograf-882** — a Soviet flatbed plotter built around the **K580IK80A** CPU (Intel 8080 clone).
 

@@ -1,8 +1,11 @@
 # Autograf-882 Debug Simulator v1.0.10
 
-![Autograf-882 Debug Simulator](images/Aftograf-882-Debuger.png)
+![Autograf-882 — Appareil d'Origine](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
+*Le traceur original Autograf-882*
 
-Un débogueur et simulateur natif macOS pour l'**Autograf-882** — un traceur à plat soviétique basé sur le **K580IK80A** (clone de l'Intel 8080). Implémenté comme application GUI native en **Rust (egui/eframe)**.
+![Autograf-882 Debug Simulator](images/Avtograf8445-sh003.png)
+*Simulateur débogueur en action (Rust/egui)*
+
 
 ## Fonctionnalités
 

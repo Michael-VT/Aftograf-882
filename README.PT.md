@@ -1,8 +1,11 @@
 # Autograf-882 Debug Simulator v1.0.10
 
-![Autograf-882 Debug Simulator](images/Aftograf-882-Debuger.png)
+![Autograf-882 — Dispositivo Original](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
+*O plotter Autograf-882 original*
 
-Um depurador e simulador nativo macOS para o **Autograf-882** — um plotter de mesa soviético baseado no **K580IK80A** (clone do Intel 8080). Implementado como aplicação GUI nativa em **Rust (egui/eframe)**.
+![Autograf-882 Debug Simulator](images/Avtograf8445-sh003.png)
+*Simulador debugger em ação (Rust/egui)*
+
 
 ## Recursos
 

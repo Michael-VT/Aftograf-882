@@ -1,8 +1,11 @@
 # Autograf-882 Debug Simulator v1.0.10
 
-![Autograf-882 Debug Simulator](images/Aftograf-882-Debuger.png)
+![Autograf-882 — Originalgerät](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
+*Der originale Autograf-882 Flachbettplotter*
 
-Ein nativer macOS-Debugger und Simulator für den **Autograf-882** — einen sowjetischen Flachbettplotter auf Basis des **K580IK80A** (Intel 8080 Klon). Implementiert als native GUI-Anwendung in **Rust (egui/eframe)**.
+![Autograf-882 Debug Simulator](images/Avtograf8445-sh003.png)
+*Debugger-Simulator in Aktion (Rust/egui)*
+
 
 ## Funktionen
 
