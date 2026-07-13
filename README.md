@@ -3,7 +3,6 @@
 ![Autograf-882 — Original Device](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
 *The original Autograf-882 flatbed plotter*
 
-
 A native macOS debugger and simulator for the **Autograf-882** — a Soviet flatbed plotter built around the **K580IK80A** CPU (Intel 8080 clone).
 
 This project provides a complete digital twin of the original hardware: CPU emulation, memory-mapped I/O, disassembler, plotter simulation, USART terminal, and HPGL file loader — implemented as a native GUI application using **egui/eframe (Rust)**.
