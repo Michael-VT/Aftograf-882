@@ -5,9 +5,10 @@ __pycache__/
 
 # Build artifacts
 a.out
-*.bak
-
-# OS
+# Editor temporaries
+:w
+15j$
+'
 .DS_Store
 Thumbs.db
 

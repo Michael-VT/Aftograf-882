@@ -1,150 +1,165 @@
-# Autograf-882 Debug Simulator
+# Autograf-882 Debug Simulator v1.0.8
 
 ![Autograf-882 Debug Simulator](images/Aftograf-882-Debuger.png)
 
-An interactive browser-based debugger and simulator for the **Autograf-882** — a Soviet flatbed plotter (drafting machine) built around the **K580IK80A** CPU (a clone of the Intel 8080).
+A native macOS debugger and simulator for the **Autograf-882** — a Soviet flatbed plotter built around the **K580IK80A** CPU (Intel 8080 clone).
 
-This project provides a complete digital twin of the original hardware: CPU emulation, memory-mapped I/O, disassembler, plotter simulation, USART terminal, and HPGL file loader — all running in the browser with no server-side logic.
+This project provides a complete digital twin of the original hardware: CPU emulation, memory-mapped I/O, disassembler, plotter simulation, USART terminal, and HPGL file loader — implemented as a native GUI application using **egui/eframe (Rust)**.
+
+A browser-based version (`sim/`) is also available.
 
 ## Features
 
-### CPU Emulation (cpu8080.js)
-- Full K580IK80A / Intel 8080 emulation — all 256 opcodes, table-driven
-- Registers: A, B, C, D, E, H, L, SP, PC
+### CPU Emulation (Rust)
+- Full K580IK80A / Intel 8080 emulation — all 256 opcodes, table-driven dispatch
+- Registers: A, B, C, D, E, H, L, SP, PC (editable in UI)
 - Flags: S, Z, AC, P, CY (8080 bit positions)
 - Interrupt handling (INTR with RST vector)
-- T-state cycle counting
-- Clock speed slider: from max (unlimited) down to 100 Hz
+- T-state cycle counting — displayed in the CPU panel
+- Clock speed control: 5000 / 10000 / 50000 / 100000 / 33333 (1 MHz) instructions per batch
 
-### System Memory (memory.js)
-- ROM: 24 KB at `$0000–$5FFF` (three D2764A EPROMs)
-- RAM: 1 KB at `$6000–$63FF` (K537RU10)
+### System Memory
+- ROM: 24 KB at `$0000–$5FFF` (three D2764A EPROMs, firmware embedded at build time)
+- RAM: 2 KB at `$6000–$67FF` (K537RU10)
 - Memory-mapped I/O: PPI1 at `$E000`, PPI2 at `$E400`, PIT at `$E800`, USART at `$EC00`
-- Unmapped reads return `$FF`; writes to ROM/unmapped are logged and trigger a callback
+- Unmapped reads return `$FF`; writes to ROM are blocked with a warning
 
 ### Disassembler
-- Recursive-descent hybrid disassembler built from the CPU opcode table
+- Table-driven disassembler from the CPU opcode table
 - 6-column layout: breakpoint, address, raw bytes, mnemonic, operands, annotation
-- Follow-PC mode highlights the current instruction
-- Virtual scroll through all 64 KB of address space
-- Click to toggle breakpoints, double-click to jump PC to that address
-- Search by address (`J` key jumps to the hovered line)
-- Copy-to-clipboard for the visible range
+- **Follow PC** mode — current instruction always centered in the window
+- Full 64 KB address range accessible via search bar and navigation buttons (◀▶)
+- Click to toggle breakpoints, hover to preview addresses
+- 256 instructions visible per view
 
 ### Memory Viewer
-- Virtual-scrollable dump of all 64 KB of address space
-- Color-coded regions: ROM (grey), RAM (yellow), I/O (violet)
-- Inline byte editing — click a byte, edit in hex, Tab to next byte
-- HL pointer highlighting with an orange marker
-- Address bar for quick navigation
+- 64 rows × 16 bytes = 1 KB visible at a time
+- Full 64 KB navigation via address bar, Go button, and ◀▶ buttons
+- Click **BC:**, **DE:**, **HL:**, **SP:** in the CPU panel to jump memory to that address
+- Color-coded regions: ROM (brown), RAM (yellow), PPI1/2 (red/teal), PIT (olive), USART (purple)
+- HL pointer highlighted in orange
+- Inline byte editing — double-click a byte, type hex value, press Enter or click away
+- ASCII representation column on the right
 
-### I/O Device Stubs
-- **PPI8255** (K580VV55A): two chips, 3 ports each + control register
-- **PIT8253** (K580VI53): 3 × 16-bit counters with latch/readback
-- **USART8251** (K580VV51A): RX/TX buffers with XOn-XOff flow control, interrupt generation
+### Peripherals (Rust)
+- **K580VV55A (PPI8255)**: two chips, 3 ports each + control register
+- **K580VI53 (PIT8253)**: 3 × 16-bit counters with latch
+- **K580VV51A (USART8251)**: RX/TX buffers with XOn-XOff flow control, interrupt generation
 
 ### Plotter Simulation
 - XY stepper motor simulation from PPI port phases
 - 7 pen colors from firmware analysis
-- A4 portrait canvas (1:√2 aspect ratio) with Retina support
-- Auto-scaling grid, current-position cursor, pen-up/pen-down tracking
-- Clear canvas and autofit buttons
+- A4 portrait canvas (1:√2 aspect ratio)
+- Auto-scaling grid, cursor tracking, limit switches
+- Clear canvas and HPGL controls
+
+### Keyboard / Sensors
+- **DIP switches (D4-D7)**: toggleable in the Sensors panel under CPU registers
+- **End stops (D0-D3)**: toggleable limit switches
+- **LED indicators**: PPI1 port C bits shown graphically
+- **Keyboard matrix**: 6×2 key state display
 
 ### HPGL File Loader
-- Load HPGL plot files: `IN`, `SP`, `PU`, `PD` commands
-- **Direct render mode**: parse and draw on the canvas with animation
-- **UART mode**: send HPGL text character-by-character to the USART for the firmware to process
-- Progress indicator and pause/resume
+- Load HPGL plot files: `IN`, `SP`, `PU`, `PD`, `PA`, `PR` commands
+- **Preview mode**: draw all segments on the plotter canvas
+- **Step mode**: ▶ Next / ▶▶ All / ⟲ Reset — step through segments one by one
+- **Draw up to line N**: enter a segment number and click Go
+- Active line highlighted in yellow with line number indicator
+- Progress bar with percentage
 
 ### USART Terminal
-- Hex input field for sending bytes to the CPU (e.g., `01 02 FF`)
-- File upload with XOn-XOff paced transfer
-- Transmit log with printable character display and hex fallback
-- TXRDY/RXRDY status display
+- Hex input field for sending bytes to the CPU
+- Transmit log with display of printable characters and hex codes
+- TXRDY/RXRDY status
 
-### Session Save / Load
-- Snapshot the complete CPU state, RAM contents, breakpoints, and plotter lines
-- Save as a timestamped JSON file
-- Restore from a previously saved session
+### Sensors & Diagnostics
+- CPU register panel with cycle counter
+- Stack display (4 words)
+- Trace buffer (last 100 instructions)
+- I/O device status (PPI, PIT, USART register values)
+- Memory region color legend
 
-### Help System
-- `?` button in the header and `?`/`/` keyboard shortcut open a help overlay
-- Keyboard shortcuts reference table
-- Mouse interaction guide
-- File format overview
-- Quick tips
+## How to Build & Run (Rust)
 
-### Theme Support
-- Dark theme (default) — Tokyo Night inspired palette
-- Light theme — clean light palette for daytime use
-- Switch in Settings panel, persists to `localStorage`
+### Prerequisites
+- Rust toolchain (install via `rustup`)
+- macOS (for native GUI; egui/eframe supports Linux and Windows too)
 
-### Settings Panel
-- Watch variable address configuration (X, Y, pen position, color)
-- Custom watch variables with 1-byte or 2-byte readout
-- ROM chip offset configuration
-- Manual firmware loading with address selection
-- Theme selector
-- All settings persist to `localStorage`
-
-## How to Run
+### Build & Run
 
 ```bash
-cd ~/work/Antigravity/github/aftograf
+cd rust
+cargo run --release
+```
+
+### Run Tests
+
+```bash
+cd rust
+cargo test -- --test-threads=1
+```
+
+## Browser Version (`sim/`)
+
+The older browser-based version is in the `sim/` directory. To run:
+
+```bash
 python3 -m http.server 8080
+# Open http://localhost:8080/sim/
 ```
 
-Then open `http://localhost:8080/sim/` in a browser.
+## Project Structure
 
-Firmware (`firmware.bin`, 24 KB) loads automatically on page start.  
-If missing, use the 📂 button or Settings → Load firmware.
-
-## Build bundle.js
-
-```bash
-cd sim && node build.js
+```
+├── rust/                  ← Rust native GUI (primary)
+│   ├── Cargo.toml        Package manifest
+│   ├── build.rs          Firmware embedder
+│   ├── TESTS.md          Test description
+│   ├── src/
+│   │   ├── main.rs       Entry point + eframe window
+│   │   ├── app.rs        Main application (UI, stepping, I/O callbacks)
+│   │   ├── cpu.rs        Intel 8080 CPU emulator
+│   │   ├── memory.rs     MMU with ROM, RAM, I/O decode
+│   │   ├── disasm.rs     Disassembler
+│   │   ├── plotter.rs    XY plotter simulation
+│   │   ├── hpgl.rs       HPGL parser
+│   │   ├── ppi8255.rs    K580VV55A (PPI)
+│   │   ├── pit8253.rs    K580VI53 (PIT)
+│   │   ├── usart8251.rs  K580VV51A (USART)
+│   │   ├── settings.rs   Configuration
+│   │   └── session.rs    Save/load state
+│   └── assets/
+│       └── firmware.bin  24 KB firmware image
+├── sim/                   ← Browser-based version
+│   ├── index.html
+│   ├── styles.css
+│   ├── bundle.js
+│   ├── build.js
+│   ├── cpu8080.js
+│   ├── memory.js
+│   └── firmware.bin
+├── docs/                  ← Documentation & datasheets
+├── images/                ← Screenshots
+├── *.hpgl                 ← Sample HPGL plot files
+├── README.*.md            ← This file (6 languages)
+└── CHECKPOINT.md          ← Development notes
 ```
 
-Builds a single-file `bundle.js` from the ES6 modules (`settings.js`, `memory.js`, `cpu8080.js`, `main.js`) — strips `import`/`export` and concatenates in dependency order.
-
-## Keyboard Shortcuts
+## Keyboard Shortcuts (Rust version)
 
 | Key | Action |
-|---|---|
+|-----|--------|
 | `Space` / `→` | Step one instruction |
 | `R` | Reset CPU |
 | `F5` | Run / Pause |
 | `B` | Toggle breakpoint at PC |
 | `J` | Jump PC to the address under cursor |
 | `?` / `/` | Open help overlay |
-
-## Project Structure
-
-```
-├── sim/                  ← Browser debug simulator
-│   ├── index.html        Entry point (3-column layout)
-│   ├── styles.css        Dark/light theme system
-│   ├── bundle.js         Single-file build output
-│   ├── build.js          Concatenation build script
-│   ├── main.js           App controller & I/O device stubs
-│   ├── cpu8080.js        K580IK80A CPU emulator
-│   ├── memory.js         MMU with ROM, RAM, I/O
-│   ├── settings.js       Settings manager + localStorage
-│   └── firmware.bin      24 KB firmware image
-├── disasm8080.py         Python recursive disassembler
-├── autograf-882-disassembly.asm  Full disassembly listing
-├── 01_Plotter-*-Schematic.pdf    Reverse-engineered schematic
-└── CHECKPOINT.md         Development checkpoint
-```
+| `Escape` | Close help/settings |
 
 ## License
 
 Reverse-engineering and documentation of the Autograf-882 hardware for preservation and educational purposes.
-
-## Acknowledgements
-
-- The Soviet engineers who designed the K580IK80A and the Autograf-882
-- The open-source community for 8080 emulation references
 
 ---
 
