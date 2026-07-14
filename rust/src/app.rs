@@ -1015,7 +1015,6 @@ impl AftografApp {
 
         egui::ScrollArea::vertical()
             .id_source("mem_scroll_64kb")
-            .auto_shrink([false; 2])
             .show_viewport(ui, |ui, viewport| {
                 ui.set_min_height(total_height);
 
@@ -1096,15 +1095,25 @@ impl AftografApp {
                                 }
                             }
                         }
-                        // ASCII
+                        // ASCII — per-character, clickable, highlights with hex
                         ui.label(" |");
-                        let mut ascii_str = String::with_capacity(16);
                         for c in 0..16u16 {
                             let byte_addr = base.wrapping_add(c);
                             let v = self.mmu.peek(byte_addr);
-                            ascii_str.push(if (32..=126).contains(&v) { v as char } else { '.' });
+                            let ch = if (32..=126).contains(&v) { v as char } else { '.' };
+                            let is_hl = byte_addr == self.hl_addr;
+                            let is_edit = self.mem_edit_addr == Some(byte_addr);
+                            let ascii_color = if is_edit { egui::Color32::YELLOW }
+                                else if is_hl { egui::Color32::from_rgb(255, 158, 100) }
+                                else { egui::Color32::WHITE };
+                            let resp = ui.add(egui::Label::new(
+                                egui::RichText::new(ch.to_string()).color(ascii_color).monospace()
+                            ).sense(egui::Sense::click()));
+                            if resp.double_clicked() {
+                                self.mem_edit_addr = Some(byte_addr);
+                                self.mem_edit_buf = format!("{v:02X}");
+                            }
                         }
-                        ui.add(egui::Label::new(egui::RichText::new(&ascii_str).monospace()));
                     });
                 }
 
