@@ -91,7 +91,6 @@ pub struct AftografApp {
     // Memory viewer
     pub mem_scroll_addr: u16,
     pub mem_edit_addr: Option<u16>,
-    pub mem_view_ver: u64,
     pub mem_edit_buf: String,
     pub mem_scroll_to_row: Option<u16>,
     pub hl_addr: u16,
@@ -167,7 +166,6 @@ impl AftografApp {
             disasm_addr: 0,
             asm_hover_addr: None,
             mem_scroll_addr: 0,
-            mem_view_ver: 0,
             mem_edit_addr: None,
             mem_edit_buf: String::new(),
             hl_addr: 0,
@@ -551,7 +549,7 @@ impl AftografApp {
                         if ui.add(egui::Label::new("BC:").sense(egui::Sense::click())).clicked() {
                             self.mem_scroll_addr = self.cpu.get_bc() & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                            self.mem_view_ver += 1;
+                            self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
                         }
                         ui.label("B:");
                         let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_b).desired_width(30.0).font(egui::TextStyle::Monospace));
@@ -570,7 +568,7 @@ impl AftografApp {
                         if ui.add(egui::Label::new("DE:").sense(egui::Sense::click())).clicked() {
                             self.mem_scroll_addr = self.cpu.get_de() & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                            self.mem_view_ver += 1;
+                            self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
                         }
                         ui.label("D:");
                         let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_d).desired_width(30.0).font(egui::TextStyle::Monospace));
@@ -589,7 +587,7 @@ impl AftografApp {
                         if ui.add(egui::Label::new("HL:").sense(egui::Sense::click())).clicked() {
                             self.mem_scroll_addr = self.cpu.get_hl() & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                            self.mem_view_ver += 1;
+                            self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
                         }
                         ui.label("H:");
                         let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_h).desired_width(30.0).font(egui::TextStyle::Monospace));
@@ -608,7 +606,7 @@ impl AftografApp {
                         if ui.add(egui::Label::new("SP:").sense(egui::Sense::click())).clicked() {
                             self.mem_scroll_addr = self.cpu.sp & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                            self.mem_view_ver += 1;
+                            self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
                         }
                         let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_sp).desired_width(50.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
@@ -1032,13 +1030,10 @@ impl AftografApp {
                 // Update scroll addr from scroll position
                 self.mem_scroll_addr = (first_visible as u16) * 16;
 
-                // Spacer before first visible row
-                if first_visible > 0 {
-                    let cursor_y = ui.cursor().min.y;
-                    let target_y = first_visible as f32 * ROW_H;
-                    if target_y > cursor_y {
-                        ui.add_space(target_y - cursor_y);
-                    }
+                // Spacer before first visible row (viewport coords)
+                let space = (first_visible as f32 * ROW_H - viewport.min.y).max(0.0);
+                if space > 0.0 {
+                    ui.add_space(space);
                 }
 
                 // Render visible rows
@@ -1134,7 +1129,7 @@ impl AftografApp {
         let ch = ((cw as f32) * std::f32::consts::SQRT_2) as u32;
         let (rect, _) = ui.allocate_exact_size(
             egui::vec2(cw.max(100) as f32, ch.max(100) as f32),
-            egui::Sense::click(),
+            egui::Sense::hover(),
         );
         {
             let painter = ui.painter();
