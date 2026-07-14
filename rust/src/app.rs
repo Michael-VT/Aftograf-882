@@ -1142,7 +1142,7 @@ impl AftografApp {
         }
         
         // Info + controls — in ScrollArea if they overflow
-        egui::ScrollArea::vertical()
+        egui::ScrollArea::vertical().auto_shrink([false; 2])
             .id_source("plotter_controls")
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
