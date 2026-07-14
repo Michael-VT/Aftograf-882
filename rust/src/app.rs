@@ -1011,29 +1011,38 @@ impl AftografApp {
         const TOTAL_ROWS: usize = 4096; // 65536 / 16
         let total_height = TOTAL_ROWS as f32 * ROW_H;
 
+        // Handle scroll-to-row BEFORE ScrollArea
+        let scroll_to = self.mem_scroll_to_row.take();
+
         egui::ScrollArea::vertical()
             .id_source("mem_scroll_64kb")
-            .show_viewport(ui, |ui, viewport| {
+            .show(ui, |ui| {
                 ui.set_min_height(total_height);
 
-                // Visible row range (viewport gives visible rect in content coords)
-                let first_visible = (viewport.min.y / ROW_H).max(0.0).floor() as usize;
-                let vis_count = ((viewport.height() / ROW_H).ceil() as usize) + 2;
-                let last_visible = (first_visible + vis_count).min(TOTAL_ROWS);
-
-                if let Some(target_row) = self.mem_scroll_to_row.take() {
+                // Programmatic scroll (works in show() — child origin = content origin)
+                if let Some(target_row) = scroll_to {
                     let target_y = target_row as f32 * ROW_H;
-                    let rect = egui::Rect::from_min_size(egui::pos2(0.0, target_y), egui::vec2(1.0, ROW_H));
-                    ui.scroll_to_rect(rect, Some(egui::Align::TOP));
+                    ui.scroll_to_rect(
+                        egui::Rect::from_min_size(egui::pos2(0.0, target_y), egui::vec2(1.0, ROW_H)),
+                        Some(egui::Align::TOP),
+                    );
                 }
 
-                // Update scroll addr from scroll position
+                // Determine visible rows from clip rect
+                let clip = ui.clip_rect();
+                let content_top = ui.min_rect().top();
+                let first_visible = ((clip.min.y - content_top) / ROW_H).max(0.0).floor() as usize;
+                let vis_count = ((clip.height() / ROW_H).ceil() as usize) + 2;
+                let last_visible = (first_visible + vis_count).min(TOTAL_ROWS);
+
+                // Update scroll addr from viewport
                 self.mem_scroll_addr = (first_visible as u16) * 16;
 
-                // Spacer before first visible row (viewport coords)
-                let space = (first_visible as f32 * ROW_H - viewport.min.y).max(0.0);
-                if space > 0.0 {
-                    ui.add_space(space);
+                // Spacer to first visible row
+                let skip_y = first_visible as f32 * ROW_H;
+                let cursor_y = ui.cursor().min.y;
+                if skip_y > cursor_y {
+                    ui.add_space(skip_y - cursor_y);
                 }
 
                 // Render visible rows
@@ -1111,13 +1120,6 @@ impl AftografApp {
                         }
                     });
                 }
-
-                // Spacer after last visible row
-                let last_y = last_visible as f32 * ROW_H;
-                let remaining = total_height - last_y;
-                if remaining > 0.0 {
-                    ui.add_space(remaining);
-                }
             });
     }
 
@@ -1135,9 +1137,9 @@ impl AftografApp {
             let painter = ui.painter();
             self.paint_plotter(painter, rect);
         }
-        
+
         // Info + controls — in ScrollArea if they overflow
-        egui::ScrollArea::vertical().auto_shrink([false; 2])
+        egui::ScrollArea::vertical()
             .id_source("plotter_controls")
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
