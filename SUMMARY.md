@@ -1,6 +1,6 @@
 # Aftograf-882 — Project Summary
 
-**Version:** v1.0.10  
+**Version:** v1.0.11  
 **Build:** `cargo build` ✅ | `cargo clippy -- -D warnings` ✅ | `cargo test` 37/37 ✅  
 **Last commit:** `bb809e4` — 2026-07-14  
 **Remote:** https://github.com/Michael-VT/Aftograf-882
@@ -53,7 +53,7 @@
 - Top: original device photo (Автограф_882.01-1990.jpg)
 - After Features: Rust debugger screenshot (Avtograf8445-sh003.png)
 - Browser section: JS debugger screenshot (Aftograf-882-Debuger.png)
-- Version: 1.0.10
+- Version: 1.0.11
 
 ---
 

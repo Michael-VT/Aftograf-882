@@ -1,4 +1,4 @@
-# Autograf-882 Debug Simulator v1.0.10
+# Autograf-882 Debug Simulator v1.0.11
 
 ![Autograf-882 — Appareil d'Origine](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
 *Le traceur original Autograf-882*

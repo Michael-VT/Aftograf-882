@@ -92,8 +92,16 @@ pub struct AftografApp {
     pub mem_scroll_addr: u16,
     pub mem_edit_addr: Option<u16>,
     pub mem_edit_buf: String,
-    pub mem_scroll_to_row: Option<u16>,
+    pub mem_scroll_target: Option<u16>,
     pub hl_addr: u16,
+
+    // Plotter canvas cache
+    pub plotter_canvas_size: (u32, u32),
+    pub plotter_scale: f32,
+    pub plotter_min_x: i32,
+    pub plotter_max_x: i32,
+    pub plotter_min_y: i32,
+    pub plotter_max_y: i32,
 
     // USART
     pub usart_hex_input: String,
@@ -168,10 +176,16 @@ impl AftografApp {
             mem_scroll_addr: 0,
             mem_edit_addr: None,
             mem_edit_buf: String::new(),
+            plotter_scale: 1.0,
+            plotter_min_x: 0,
+            plotter_max_x: 0,
+            plotter_min_y: 0,
+            plotter_max_y: 0,
             hl_addr: 0,
-            usart_hex_input: String::new(),
-            mem_scroll_to_row: None,
+            plotter_canvas_size: (0, 0),
+            mem_scroll_target: None,
             usart_log: String::new(),
+            usart_hex_input: String::new(),
             hpgl: HPGL::new(),
             settings: Settings::new(),
             show_settings: false,
@@ -421,11 +435,9 @@ impl eframe::App for AftografApp {
                 self.ui_left_panel(ui);
             });
 
-        // ── Right panel: Plotter Canvas ──
+        // ── Right panel: Plotter Canvas (exact 320px, no feedback loop) ──
         egui::SidePanel::right("right_panel")
-            .resizable(true)
-            .default_width(320.0)
-            .min_width(250.0)
+            .exact_width(320.0)
             .show(ctx, |ui| {
                 self.ui_right_panel(ui);
             });
@@ -458,7 +470,7 @@ impl AftografApp {
     fn ui_header(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Aftograf-882 Debuger");
-            ui.label("v1.0.10".to_string());
+            ui.label("v1.0.11".to_string());
 
             ui.separator();
 
@@ -549,7 +561,7 @@ impl AftografApp {
                         if ui.add(egui::Label::new("BC:").sense(egui::Sense::click())).clicked() {
                             self.mem_scroll_addr = self.cpu.get_bc() & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                            self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
+                            self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                         }
                         ui.label("B:");
                         let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_b).desired_width(30.0).font(egui::TextStyle::Monospace));
@@ -568,7 +580,7 @@ impl AftografApp {
                         if ui.add(egui::Label::new("DE:").sense(egui::Sense::click())).clicked() {
                             self.mem_scroll_addr = self.cpu.get_de() & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                            self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
+                            self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                         }
                         ui.label("D:");
                         let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_d).desired_width(30.0).font(egui::TextStyle::Monospace));
@@ -587,7 +599,7 @@ impl AftografApp {
                         if ui.add(egui::Label::new("HL:").sense(egui::Sense::click())).clicked() {
                             self.mem_scroll_addr = self.cpu.get_hl() & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                            self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
+                            self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                         }
                         ui.label("H:");
                         let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_h).desired_width(30.0).font(egui::TextStyle::Monospace));
@@ -606,7 +618,7 @@ impl AftografApp {
                         if ui.add(egui::Label::new("SP:").sense(egui::Sense::click())).clicked() {
                             self.mem_scroll_addr = self.cpu.sp & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                            self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
+                            self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                         }
                         let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_sp).desired_width(50.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
@@ -976,171 +988,193 @@ impl AftografApp {
             if ui.add(egui::TextEdit::singleline(&mut self.mem_search).desired_width(60.0).font(egui::TextStyle::Monospace)).lost_focus() {
                 if let Ok(addr) = u16::from_str_radix(self.mem_search.trim_start_matches("$").trim_start_matches("0x"), 16) {
                     self.mem_scroll_addr = addr & 0xFFF0;
-                    self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
+                    self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                 }
             }
             if ui.button("Go").clicked() {
                 if let Ok(addr) = u16::from_str_radix(self.mem_search.trim_start_matches("$").trim_start_matches("0x"), 16) {
                     self.mem_scroll_addr = addr & 0xFFF0;
-                    self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
+                    self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                 }
             }
             if ui.button("◀").clicked() {
                 self.mem_scroll_addr = self.mem_scroll_addr.saturating_sub(0x100);
                 self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
+                self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
             }
             if ui.button("▶").clicked() {
                 self.mem_scroll_addr = self.mem_scroll_addr.saturating_add(0x100);
                 self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
+                self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
             }
             if ui.button("HL").clicked() {
                 self.mem_scroll_addr = self.cpu.get_hl() & 0xFFF0;
                 self.mem_search = format!("{:04X}", self.mem_scroll_addr);
-                self.mem_scroll_to_row = Some(self.mem_scroll_addr / 16);
+                self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
             }
             if ui.button("↺").clicked() { }
         });
         if !self.mem_warning.is_empty() {
             ui.colored_label(egui::Color32::RED, &self.mem_warning);
         }
-
         // ── Virtual-scroll 64KB memory viewer ──
         const ROW_H: f32 = 18.0;
         const TOTAL_ROWS: usize = 4096; // 65536 / 16
         let total_height = TOTAL_ROWS as f32 * ROW_H;
 
-        // Handle scroll-to-row BEFORE ScrollArea
-        let scroll_to = self.mem_scroll_to_row.take();
+        let mut scroll_area = egui::ScrollArea::vertical()
+            .id_source("mem_scroll_64kb");
 
-        egui::ScrollArea::vertical()
-            .id_source("mem_scroll_64kb")
-            .show(ui, |ui| {
-                ui.set_min_height(total_height);
+        // Only force scroll offset on explicit user action (Go/HL/nav)
+        if let Some(target_row) = self.mem_scroll_target.take() {
+            scroll_area = scroll_area.vertical_scroll_offset(target_row as f32 * ROW_H);
+        }
 
-                // Programmatic scroll (works in show() — child origin = content origin)
-                if let Some(target_row) = scroll_to {
-                    let target_y = target_row as f32 * ROW_H;
-                    ui.scroll_to_rect(
-                        egui::Rect::from_min_size(egui::pos2(0.0, target_y), egui::vec2(1.0, ROW_H)),
-                        Some(egui::Align::TOP),
-                    );
-                }
+        scroll_area.show_viewport(ui, |ui, viewport| {
+            ui.set_min_height(total_height);
 
-                // Determine visible rows from clip rect
-                let clip = ui.clip_rect();
-                let content_top = ui.min_rect().top();
-                let first_visible = ((clip.min.y - content_top) / ROW_H).max(0.0).floor() as usize;
-                let vis_count = ((clip.height() / ROW_H).ceil() as usize) + 2;
-                let last_visible = (first_visible + vis_count).min(TOTAL_ROWS);
+            // viewport is the visible rect in content coordinates
+            let first_visible = (viewport.min.y / ROW_H) as usize;
+            let last_visible = ((viewport.max.y / ROW_H) as usize + 1).min(TOTAL_ROWS);
 
-                // Update scroll addr from viewport
-                self.mem_scroll_addr = (first_visible as u16) * 16;
+            // Update scroll addr from viewport position
+            self.mem_scroll_addr = (first_visible as u16) * 16;
 
-                // Spacer to first visible row
-                let skip_y = first_visible as f32 * ROW_H;
-                let cursor_y = ui.cursor().min.y;
-                if skip_y > cursor_y {
-                    ui.add_space(skip_y - cursor_y);
-                }
+            // Skip to first visible row
+            let skip_y = first_visible as f32 * ROW_H;
+            if skip_y > 0.0 {
+                ui.add_space(skip_y);
+            }
 
-                // Render visible rows
-                for r in first_visible..last_visible {
-                    let base = (r as u16) * 16;
-                    let is_rom = base < 0x6000;
-                    let is_ram = (0x6000..=0x67FF).contains(&base);
-                    let addr_color = if is_rom { egui::Color32::from_rgb(101, 67, 33) }
-                        else if is_ram { egui::Color32::from_rgb(210, 180, 40) }
-                        else if (0xE000..0xE400).contains(&base) { egui::Color32::from_rgb(200, 100, 100) }
-                        else if (0xE400..0xE800).contains(&base) { egui::Color32::from_rgb(100, 180, 200) }
-                        else if (0xE800..0xEC00).contains(&base) { egui::Color32::from_rgb(180, 150, 80) }
-                        else if (0xEC00..0xF000).contains(&base) { egui::Color32::from_rgb(150, 100, 200) }
-                        else { egui::Color32::WHITE };
-                    ui.horizontal(|ui| {
-                        ui.colored_label(addr_color, format!("${base:04X}"));
-                        for c in 0..16u16 {
-                            let byte_addr = base.wrapping_add(c);
-                            let v = self.mmu.peek(byte_addr);
-                            let is_hl = byte_addr == self.hl_addr;
-                            let byte_color = if is_hl { egui::Color32::from_rgb(255, 158, 100) }
-                                else if (0xE000..0xE400).contains(&byte_addr) { egui::Color32::from_rgb(200, 100, 100) }
-                                else if (0xE400..0xE800).contains(&byte_addr) { egui::Color32::from_rgb(100, 180, 200) }
-                                else if (0xE800..0xEC00).contains(&byte_addr) { egui::Color32::from_rgb(180, 150, 80) }
-                                else if (0xEC00..0xF000).contains(&byte_addr) { egui::Color32::from_rgb(150, 100, 200) }
-                                else if (0x6000..=0x67FF).contains(&byte_addr) { egui::Color32::from_rgb(220, 200, 80) }
-                                else if byte_addr < 0x6000 { egui::Color32::from_rgb(139, 90, 43) }
-                                else { egui::Color32::WHITE };
-                            let byte_str = format!("{v:02X}");
-                            let resp = ui.add(egui::Label::new(
-                                egui::RichText::new(&byte_str).color(byte_color).monospace()
-                            ).sense(egui::Sense::click()));
-                            if resp.double_clicked() {
-                                self.mem_edit_addr = Some(byte_addr);
-                                self.mem_edit_buf = byte_str.clone();
-                            }
-                            if self.mem_edit_addr == Some(byte_addr) {
-                                let ted = ui.add(egui::TextEdit::singleline(&mut self.mem_edit_buf)
-                                    .desired_width(18.0)
-                                    .font(egui::TextStyle::Monospace)
-                                    .char_limit(2));
-                                if ted.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    if (0x6000..=0x67FF).contains(&byte_addr) || (0xE000..=0xEFFF).contains(&byte_addr) {
-                                        if let Ok(v) = u8::from_str_radix(self.mem_edit_buf.trim(), 16) {
-                                            self.mmu.poke(byte_addr, v);
-                                            self.mem_warning = String::new();
-                                        }
-                                    } else {
-                                        let region = if byte_addr < 0x6000 { "ROM" } else { "свободная" };
-                                        self.mem_warning = format!("⚠ Ошибка: {region} ${byte_addr:04X} — запись невозможна");
-                                        self.mem_invalid_write = Some(byte_addr);
+            // Render visible rows
+            for r in first_visible..last_visible {
+                let base = (r as u16) * 16;
+                let is_rom = base < 0x6000;
+                let is_ram = (0x6000..=0x67FF).contains(&base);
+                let addr_color = if is_rom { egui::Color32::from_rgb(101, 67, 33) }
+                    else if is_ram { egui::Color32::from_rgb(210, 180, 40) }
+                    else if (0xE000..0xE400).contains(&base) { egui::Color32::from_rgb(200, 100, 100) }
+                    else if (0xE400..0xE800).contains(&base) { egui::Color32::from_rgb(100, 180, 200) }
+                    else if (0xE800..0xEC00).contains(&base) { egui::Color32::from_rgb(180, 150, 80) }
+                    else if (0xEC00..0xF000).contains(&base) { egui::Color32::from_rgb(150, 100, 200) }
+                    else { egui::Color32::WHITE };
+                ui.horizontal(|ui| {
+                    ui.colored_label(addr_color, format!("${base:04X}"));
+                    for c in 0..16u16 {
+                        let byte_addr = base.wrapping_add(c);
+                        let v = self.mmu.peek(byte_addr);
+                        let is_hl = byte_addr == self.hl_addr;
+                        let byte_color = if is_hl { egui::Color32::from_rgb(255, 158, 100) }
+                            else if (0xE000..0xE400).contains(&byte_addr) { egui::Color32::from_rgb(200, 100, 100) }
+                            else if (0xE400..0xE800).contains(&byte_addr) { egui::Color32::from_rgb(100, 180, 200) }
+                            else if (0xE800..0xEC00).contains(&byte_addr) { egui::Color32::from_rgb(180, 150, 80) }
+                            else if (0xEC00..0xF000).contains(&byte_addr) { egui::Color32::from_rgb(150, 100, 200) }
+                            else if (0x6000..=0x67FF).contains(&byte_addr) { egui::Color32::from_rgb(220, 200, 80) }
+                            else if byte_addr < 0x6000 { egui::Color32::from_rgb(139, 90, 43) }
+                            else { egui::Color32::WHITE };
+                        let byte_str = format!("{v:02X}");
+                        let resp = ui.add(egui::Label::new(
+                            egui::RichText::new(&byte_str).color(byte_color).monospace()
+                        ).sense(egui::Sense::click()));
+                        if resp.double_clicked() {
+                            self.mem_edit_addr = Some(byte_addr);
+                            self.mem_edit_buf = byte_str.clone();
+                        }
+                        if self.mem_edit_addr == Some(byte_addr) {
+                            let ted = ui.add(egui::TextEdit::singleline(&mut self.mem_edit_buf)
+                                .desired_width(18.0)
+                                .font(egui::TextStyle::Monospace)
+                                .char_limit(2));
+                            if ted.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                if (0x6000..=0x67FF).contains(&byte_addr) || (0xE000..=0xEFFF).contains(&byte_addr) {
+                                    if let Ok(v) = u8::from_str_radix(self.mem_edit_buf.trim(), 16) {
+                                        self.mmu.poke(byte_addr, v);
+                                        self.mem_warning = String::new();
                                     }
-                                    self.mem_edit_addr = None;
+                                } else {
+                                    let region = if byte_addr < 0x6000 { "ROM" } else { "свободная" };
+                                    self.mem_warning = format!("⚠ Ошибка: {region} ${byte_addr:04X} — запись невозможна");
+                                    self.mem_invalid_write = Some(byte_addr);
                                 }
+                                self.mem_edit_addr = None;
                             }
                         }
-                        // ASCII — per-character, clickable, highlights with hex
-                        ui.label(" |");
-                        for c in 0..16u16 {
-                            let byte_addr = base.wrapping_add(c);
-                            let v = self.mmu.peek(byte_addr);
-                            let ch = if (32..=126).contains(&v) { v as char } else { '.' };
-                            let is_hl = byte_addr == self.hl_addr;
-                            let is_edit = self.mem_edit_addr == Some(byte_addr);
-                            let ascii_color = if is_edit { egui::Color32::YELLOW }
-                                else if is_hl { egui::Color32::from_rgb(255, 158, 100) }
-                                else { egui::Color32::WHITE };
-                            let resp = ui.add(egui::Label::new(
-                                egui::RichText::new(ch.to_string()).color(ascii_color).monospace()
-                            ).sense(egui::Sense::click()));
-                            if resp.double_clicked() {
-                                self.mem_edit_addr = Some(byte_addr);
-                                self.mem_edit_buf = format!("{v:02X}");
-                            }
+                    }
+                    // ASCII
+                    ui.label(" |");
+                    for c in 0..16u16 {
+                        let byte_addr = base.wrapping_add(c);
+                        let v = self.mmu.peek(byte_addr);
+                        let ch = if (32..=126).contains(&v) { v as char } else { '.' };
+                        let is_hl = byte_addr == self.hl_addr;
+                        let is_edit = self.mem_edit_addr == Some(byte_addr);
+                        let ascii_color = if is_edit { egui::Color32::YELLOW }
+                            else if is_hl { egui::Color32::from_rgb(255, 158, 100) }
+                            else { egui::Color32::WHITE };
+                        let resp = ui.add(egui::Label::new(
+                            egui::RichText::new(ch.to_string()).color(ascii_color).monospace()
+                        ).sense(egui::Sense::click()));
+                        if resp.double_clicked() {
+                            self.mem_edit_addr = Some(byte_addr);
+                            self.mem_edit_buf = format!("{v:02X}");
                         }
-                    });
-                }
-            });
+                    }
+                });
+            }
+        });
     }
 
     fn ui_right_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Plotter (A4)");
-        
-        // Canvas — integer pixel size, no floating drift
-        let cw = ui.available_width() as u32;
-        let ch = ((cw as f32) * std::f32::consts::SQRT_2) as u32;
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(cw.max(100) as f32, ch.max(100) as f32),
-            egui::Sense::hover(),
-        );
-        {
-            let painter = ui.painter();
-            self.paint_plotter(painter, rect);
-        }
 
-        // Info + controls — in ScrollArea if they overflow
+        // Cached canvas size — only recalculates when panel width changes
+        let raw_w = (ui.available_width() as u32).max(100);
+        let rounded_w = (raw_w / 4) * 4;
+        let (cached_w, _) = self.plotter_canvas_size;
+        if cached_w == 0 || rounded_w != cached_w {
+            let ch = ((rounded_w as f32) * std::f32::consts::SQRT_2) as u32;
+            self.plotter_canvas_size = (rounded_w, ch.max(100));
+            self.plotter_min_x = 0; // force scale recalc on next frame
+        }
+        let (cw, ch) = self.plotter_canvas_size;
+        // Recompute scale cache when lines or canvas size change
+        if self.plotter_min_x == 0 {
+            if self.plotter.lines.is_empty() {
+                self.plotter_scale = 1.0;
+                self.plotter_min_x = -1; // non-zero sentinel for "computed empty"
+                self.plotter_max_x = 0;
+                self.plotter_min_y = 0;
+                self.plotter_max_y = 0;
+            } else {
+                let mut min_x = i32::MAX; let mut max_x = i32::MIN;
+                let mut min_y = i32::MAX; let mut max_y = i32::MIN;
+                for seg in &self.plotter.lines {
+                    min_x = min_x.min(seg.x1).min(seg.x2);
+                    max_x = max_x.max(seg.x1).max(seg.x2);
+                    min_y = min_y.min(seg.y1).min(seg.y2);
+                    max_y = max_y.max(seg.y1).max(seg.y2);
+                }
+                let w = cw as f32;
+                let h = ch as f32;
+                let range_x = ((max_x - min_x).max(1)) as f32;
+                let range_y = ((max_y - min_y).max(1)) as f32;
+                let margin = 30.0;
+                self.plotter_scale = ((w - 2.0 * margin) / range_x).min((h - 2.0 * margin) / range_y);
+                self.plotter_min_x = min_x;
+                self.plotter_max_x = max_x;
+                self.plotter_min_y = min_y;
+                self.plotter_max_y = max_y;
+            }
+        }
+        // Reserve layout space for canvas (purely for cursor positioning)
+        let (_, canvas_rect) = ui.allocate_space(egui::vec2(cw as f32, ch as f32));
+        // Paint using a non-interactive painter — draw BEFORE any interaction response
+        let painter = ui.painter_at(canvas_rect);
+        Self::paint_plotter_cached(&painter, canvas_rect, &self.plotter, self.plotter_scale,
+            self.plotter_min_x, self.plotter_min_y);
         egui::ScrollArea::vertical()
             .id_source("plotter_controls")
+            .auto_shrink([false; 2])
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let _c = PEN_COLORS[self.plotter.pen_num as usize];
@@ -1170,6 +1204,7 @@ impl AftografApp {
                         self.plotter.lines.clear();
                         self.hpgl.current = 0;
                         self.hpgl.total_coords = 0;
+                        self.plotter_min_x = 0; // force recalc
                     }
                     if ui.button("📂 Load HPGL").clicked() {
                         if let Some(path) = rfd::FileDialog::new()
@@ -1182,6 +1217,7 @@ impl AftografApp {
                                 self.hpgl.current = self.hpgl.generated_segments.len();
                                 self.hpgl.total_coords = self.hpgl.generated_segments.len();
                                 self.plotter.lines.extend(self.hpgl.generated_segments.clone());
+                                self.plotter_min_x = 0; // force recalc
                             }
                         }
                     }
@@ -1189,40 +1225,24 @@ impl AftografApp {
             });
     }
 
-    fn paint_plotter(&self, painter: &egui::Painter, rect: egui::Rect) {
+
+    /// Static paint function — uses cached scale/bounds, pixel-identical every frame
+    fn paint_plotter_cached(painter: &egui::Painter, rect: egui::Rect,
+        plotter: &Plotter, scale: f32,
+        min_x: i32, min_y: i32)
+    {
         let w = rect.width();
         let h = rect.height();
 
-        // Background (paper)
-        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(245, 240, 232));
-
-        // Collect segments
-        let all_segments = &self.plotter.lines;
-        if all_segments.is_empty() {
-            // Placeholder
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
+        if plotter.lines.is_empty() {
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER,
                 "Ожидание команд плоттера…",
                 egui::FontId::proportional(14.0),
-                egui::Color32::from_rgb(180, 170, 150),
-            );
+                egui::Color32::from_rgb(180, 170, 150));
             return;
         }
 
-        // Scale
-        let mut min_x = i32::MAX; let mut max_x = i32::MIN;
-        let mut min_y = i32::MAX; let mut max_y = i32::MIN;
-        for seg in all_segments {
-            min_x = min_x.min(seg.x1).min(seg.x2);
-            max_x = max_x.max(seg.x1).max(seg.x2);
-            min_y = min_y.min(seg.y1).min(seg.y2);
-            max_y = max_y.max(seg.y1).max(seg.y2);
-        }
-        let range_x = ((max_x - min_x).max(1)) as f32;
-        let range_y = ((max_y - min_y).max(1)) as f32;
         let margin = 30.0;
-        let scale = ((w - 2.0 * margin) / range_x).min((h - 2.0 * margin) / range_y);
         let sx = |x: i32| rect.left() + margin + (x - min_x) as f32 * scale;
         let sy = |y: i32| rect.top() + h - margin - (y - min_y) as f32 * scale;
 
@@ -1233,15 +1253,14 @@ impl AftografApp {
             let y_top = rect.top() + margin;
             let y_bot = rect.bottom() - margin;
             painter.line_segment([egui::pos2(x, y_top), egui::pos2(x, y_bot)], (0.5, grid_color));
-
             let y = rect.top() + margin + (h - 2.0 * margin) * i as f32 / 10.0;
             let x_l = rect.left() + margin;
             let x_r = rect.right() - margin;
             painter.line_segment([egui::pos2(x_l, y), egui::pos2(x_r, y)], (0.5, grid_color));
         }
 
-        // Draw lines per pen color
-        for seg in all_segments {
+        // Lines
+        for seg in &plotter.lines {
             let c = PEN_COLORS[seg.pen as usize].1;
             let r = u8::from_str_radix(&c[1..3], 16).unwrap_or(0);
             let g = u8::from_str_radix(&c[3..5], 16).unwrap_or(0);
@@ -1253,15 +1272,14 @@ impl AftografApp {
         }
 
         // Pen cursor
-        let cx = sx(self.plotter.x_pos);
-        let cy = sy(self.plotter.y_pos);
-        let pen_c = PEN_COLORS[self.plotter.pen_num as usize].1;
+        let cx = sx(plotter.x_pos);
+        let cy = sy(plotter.y_pos);
+        let pen_c = PEN_COLORS[plotter.pen_num as usize].1;
         let pr = u8::from_str_radix(&pen_c[1..3], 16).unwrap_or(0);
         let pg = u8::from_str_radix(&pen_c[3..5], 16).unwrap_or(0);
         let pb = u8::from_str_radix(&pen_c[5..7], 16).unwrap_or(0);
         let pen_color = egui::Color32::from_rgb(pr, pg, pb);
-        let alpha = if self.plotter.pen_down { 1.0 } else { 0.5 };
-
+        let alpha = if plotter.pen_down { 1.0 } else { 0.5 };
         painter.circle_filled(egui::pos2(cx, cy), 3.0, pen_color.linear_multiply(alpha));
     }
 

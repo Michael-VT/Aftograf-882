@@ -9,21 +9,20 @@ mod disasm;
 mod hpgl;
 mod settings;
 mod app;
-
 use eframe::egui;
 use app::AftografApp;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Aftograf-882 Debuger v1.0.10")
+            .with_title("Aftograf-882 Debuger v1.0.11")
             .with_inner_size([1400.0, 900.0])
             .with_fullscreen(false),
         ..Default::default()
     };
 
     eframe::run_native(
-        "Aftograf-882 Debuger v1.0.10",
+        "Aftograf-882 Debuger v1.0.11",
         options,
         Box::new(|_cc| Box::new(AftografApp::new())),
     )

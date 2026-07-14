@@ -928,35 +928,35 @@ impl CPU8080 {
 }
 
 
-
 #[cfg(test)]
-#[allow(static_mut_refs)]
 mod tests {
     use super::*;
-    static mut TEST_MEM: [u8; 0x10000] = [0x00; 0x10000];
+    use std::cell::UnsafeCell;
 
-    fn test_read(a: u16) -> u8 {
-        unsafe { *std::ptr::addr_of!(TEST_MEM).cast::<u8>().add(a as usize) }
-    }
-    fn test_write(a: u16, v: u8) {
-        unsafe { *std::ptr::addr_of_mut!(TEST_MEM).cast::<u8>().add(a as usize) = v; }
-    }
+thread_local! {
+    static TEST_MEM: UnsafeCell<[u8; 0x10000]> = const { UnsafeCell::new([0x00; 0x10000]) };
+}
 
-    fn reset_mem() {
-        unsafe {
-            std::ptr::write_bytes(std::ptr::addr_of_mut!(TEST_MEM).cast::<u8>(), 0x00, TEST_MEM.len());
-        }
-    }
+fn test_read(a: u16) -> u8 {
+    TEST_MEM.with(|cell| unsafe { (*cell.get())[a as usize] })
+}
+fn test_write(a: u16, v: u8) {
+    TEST_MEM.with(|cell| unsafe { (*cell.get())[a as usize] = v });
+}
 
-    fn test_cpu() -> CPU8080 {
-        CPU8080::new(test_read, test_write, |_| 0xFF, |_, _| {})
-    }
+fn reset_mem() {
+    TEST_MEM.with(|cell| unsafe { (*cell.get()).fill(0) });
+}
 
-    fn set_mem(addr: u16, data: &[u8]) {
-        for (i, &b) in data.iter().enumerate() {
-            test_write(addr.wrapping_add(i as u16), b);
-        }
+fn test_cpu() -> CPU8080 {
+    CPU8080::new(test_read, test_write, |_| 0xFF, |_, _| {})
+}
+
+fn set_mem(addr: u16, data: &[u8]) {
+    for (i, &b) in data.iter().enumerate() {
+        test_write(addr.wrapping_add(i as u16), b);
     }
+}
 
     #[test]
     fn test_nop() {

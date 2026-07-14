@@ -1,7 +1,7 @@
 # Autograf-882 Debug Simulator — Checkpoint
 
-**Date:** 2026-07-13  
-**State:** STABLE — v1.0.10, clippy-clean, full 64KB memory scroll, HPGL fixes.
+**Date:** 2026-07-14  
+**State:** STABLE — v1.0.11, clippy-clean, all bugs fixed, 37/37 tests parallel.
 
 ## Version Convention
 
@@ -140,6 +140,15 @@ Bump until all known bugs are resolved and the simulator is stable.
 | 9 | Unused `pcBefore` variables | Removed |
 | 10 | Dead code in ANA flag logic | Removed |
 | 11 | `_renderDisasm(before)` with ignored arg | Fixed |
+
+## Bug Fixes (v1.0.11)
+
+| # | Bug | Fix |
+|---|-----|-----|
+| 1 | Tests failed in parallel (7/37) — shared `static mut TEST_MEM` | `thread_local!` per-thread memory |
+| 2 | Memory viewer empty on Go/HL due to `scroll_to_rect` race | `ScrollArea::show_viewport()` with direct viewport |
+| 3 | Plotter canvas scale changed on hover/click — `SidePanel` stored rect width feedback loop | `.exact_width(320.0)` breaks the loop; cached scale in struct |
+| 4 | HPGL drawing jumped on mouse enter — `allocate_space`/`allocate_exact_size` triggered hover relayout | `allocate_space` + `painter_at` + fully inert `Sense` |
 
 ## How to Run
 
