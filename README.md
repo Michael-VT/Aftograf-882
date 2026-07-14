@@ -113,6 +113,10 @@ python3 -m http.server 8080
 # Open http://localhost:8080/sim/
 ```
 
+![Autograf-882 Debug Simulator (JS)](images/Aftograf-882-Debuger.png)
+*Browser-based debugger simulator (JavaScript)*
+
+
 ## Project Structure
 
 ```

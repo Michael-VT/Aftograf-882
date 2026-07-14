@@ -54,6 +54,17 @@ cd rust
 cargo test -- --test-threads=1
 ```
 
+### Browser-Version
+
+```bash
+python3 -m http.server 8080
+# Öffnen Sie http://localhost:8080/sim/
+```
+
+![Autograf-882 Debug Simulator (JS)](images/Aftograf-882-Debuger.png)
+*Debugger-Simulator für den Browser (JavaScript)*
+
+
 ## Projektstruktur
 
 ```

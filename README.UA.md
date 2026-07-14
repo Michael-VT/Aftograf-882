@@ -61,6 +61,10 @@ python3 -m http.server 8080
 # Відкрий http://localhost:8080/sim/
 ```
 
+![Відладчик-симулятор Автограф-882 (JS)](images/Aftograf-882-Debuger.png)
+*Браузерний відладчик-симулятор (JavaScript)*
+
+
 ## Структура проекту
 
 ```
