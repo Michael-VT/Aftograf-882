@@ -1,112 +1,118 @@
-# Autograf-882 Debug Simulator v1.0.11
+# Autograf-882 Debug Simulator v1.0.15
 
 ![Autograf-882 — Original Device](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
 *The original Autograf-882 flatbed plotter*
 
-A native macOS debugger and simulator for the **Autograf-882** — a Soviet flatbed plotter built around the **K580IK80A** CPU (Intel 8080 clone).
+A native debugger and simulator for the **Autograf-882** — a Soviet flatbed plotter built around the **K580IK80A** CPU (Intel 8080 clone).
 
-This project provides a complete digital twin of the original hardware: CPU emulation, memory-mapped I/O, disassembler, plotter simulation, USART terminal, and HPGL file loader — implemented as a native GUI application using **egui/eframe (Rust)**.
+This project provides a complete digital twin of the original hardware: CPU emulation, memory-mapped I/O, disassembler, plotter simulation, USART terminal, and HPGL file loader — implemented in **two native GUI implementations**:
 
-A browser-based version (`sim/`) is also available.
+| Implementation | Framework | Status |
+|---------------|-----------|--------|
+| **Rust** (`rust/`) | egui/eframe | Primary, feature-complete |
+| **Go** (`go/`) | Fyne v2 | Near-feature-complete, actively developed |
+
+A legacy browser-based version (`sim/`) is also available.
 
 ## Features
 
-### CPU Emulation (Rust)
+### CPU Emulation (Rust & Go)
 - Full K580IK80A / Intel 8080 emulation — all 256 opcodes, table-driven dispatch
-- Registers: A, B, C, D, E, H, L, SP, PC (editable in UI)
-- Flags: S, Z, AC, P, CY (8080 bit positions)
-- Interrupt handling (INTR with RST vector)
+- Registers: A, B, C, D, E, H, L, SP, PC (editable in UI via hex entry fields)
+- Flags: S, Z, AC, P, CY (8080 bit positions, clickable toggle)
+- Interrupt handling (INTR with RST 7 vector)
 - T-state cycle counting — displayed in the CPU panel
-- Clock speed control: 5000 / 10000 / 50000 / 100000 / 33333 (1 MHz) instructions per batch
+- Clock speed control: 1x/10x/100x/1Kx/10Kx/100Kx speed multiplier (Go)
 
 ### System Memory
-- ROM: 24 KB at `$0000–$5FFF` (three D2764A EPROMs, firmware embedded at build time)
+- ROM: 24 KB at `$0000–$5FFF` (three D2764A EPROMs, firmware embedded)
 - RAM: 2 KB at `$6000–$67FF` (K537RU10)
 - Memory-mapped I/O: PPI1 at `$E000`, PPI2 at `$E400`, PIT at `$E800`, USART at `$EC00`
-- Unmapped reads return `$FF`; writes to ROM are blocked with a warning
+- Unmapped reads return `$FF`; writes to ROM are silently ignored
 
-### Disassembler
+### Disassembler (Rust & Go)
 - Table-driven disassembler from the CPU opcode table
-- 6-column layout: breakpoint, address, raw bytes, mnemonic, operands, annotation
-- **Follow PC** mode — current instruction always centered in the window
-- Full 64 KB address range accessible via search bar and navigation buttons (◀▶)
-- Click to toggle breakpoints, hover to preview addresses
-- 256 instructions visible per view
+- Breakpoint toggle (click to set/clear)
+- **Follow PC** mode — current instruction centered in the view
+- Full 64 KB address range via search bar and navigation buttons (◀▶)
+- Click address to jump memory viewer to that address
+- Copy visible disassembly range to clipboard (Go: Copy button)
 
-### Memory Viewer
-- 64 rows × 16 bytes = 1 KB visible at a time
+### Memory Viewer (Rust & Go)
+- 32 rows × 16 bytes = 512 bytes visible at a time (Go); 64 rows × 16 bytes (Rust)
 - Full 64 KB navigation via address bar, Go button, and ◀▶ buttons
 - Click **BC:**, **DE:**, **HL:**, **SP:** in the CPU panel to jump memory to that address
-- Color-coded regions: ROM (brown), RAM (yellow), PPI1/2 (red/teal), PIT (olive), USART (purple)
-- HL pointer highlighted in orange
-- Inline byte editing — double-click a byte, type hex value, press Enter or click away
+- Color-coded regions: ROM (brown), RAM (gold), I/O (purple) — Go version
+- Inline byte editing — click a byte, type hex value, press Enter (Go); double-click (Rust)
 - ASCII representation column on the right
 
-### Peripherals (Rust)
-- **K580VV55A (PPI8255)**: two chips, 3 ports each + control register
+### Peripherals (Rust & Go)
+- **K580VV55A (PPI8255)**: two chips (PPI1, PPI2), 3 ports each + control register
 - **K580VI53 (PIT8253)**: 3 × 16-bit counters with latch
-- **K580VV51A (USART8251)**: RX/TX buffers with XOn-XOff flow control, interrupt generation
+- **K580VV51A (USART8251)**: RX/TX buffers, status register, hex send with log
 
-### Plotter Simulation
+### Plotter Simulation (Rust & Go)
 - XY stepper motor simulation from PPI port phases
 - 7 pen colors from firmware analysis
-- A4 portrait canvas (1:√2 aspect ratio)
-- Auto-scaling grid, cursor tracking, limit switches
-- Clear canvas and HPGL controls
-
-### Keyboard / Sensors
-- **DIP switches (D4-D7)**: toggleable in the Sensors panel under CPU registers
-- **End stops (D0-D3)**: toggleable limit switches
-- **LED indicators**: PPI1 port C bits shown graphically
-- **Keyboard matrix**: 6×2 key state display
+- A4 canvas with auto-scaling grid
+- HPGL file loading and step execution
 
 ### HPGL File Loader
 - Load HPGL plot files: `IN`, `SP`, `PU`, `PD`, `PA`, `PR` commands
 - **Preview mode**: draw all segments on the plotter canvas
-- **Step mode**: ▶ Next / ▶▶ All / ⟲ Reset — step through segments one by one
-- **Draw up to line N**: enter a segment number and click Go
-- Active line highlighted in yellow with line number indicator
-- Progress bar with percentage
+- **Step mode**: ▶ Next / ▶▶ All / ⟲ Reset
+- Progress bar
 
-### USART Terminal
+### USART Terminal (Go)
 - Hex input field for sending bytes to the CPU
-- Transmit log with display of printable characters and hex codes
-- TXRDY/RXRDY status
+- Transmit log with last 20 entries displayed
+- TXRDY/RXRDY status indicators
 
 ### Sensors & Diagnostics
-- CPU register panel with cycle counter
-- Stack display (4 words)
-- Trace buffer (last 100 instructions)
-- I/O device status (PPI, PIT, USART register values)
-- Memory region color legend
+- CPU register panel with cycle counter (Rust & Go)
+- Stack display (8 words in Go, configurable)
+- DIP switch LEDs (PPI1 port A bits)
+- Session save/load to JSON file (Go)
+- Keyboard shortcuts: Space/→ Step, R Reset, F5 Run/Pause, B breakpoint, ? Help
 
 ![Autograf-882 Debug Simulator](images/Avtograf8445-sh003.png)
 *Debugger simulator in action (Rust/egui)*
 
+## Build & Run
 
-## How to Build & Run (Rust)
-
-### Prerequisites
-- Rust toolchain (install via `rustup`)
-- macOS (for native GUI; egui/eframe supports Linux and Windows too)
-
-### Build & Run
+### Rust (primary)
 
 ```bash
 cd rust
 cargo run --release
 ```
 
-### Run Tests
+Tests:
 
 ```bash
 cd rust
 cargo test -- --test-threads=1
 ```
 
-## Browser Version (`sim/`)
+### Go (actively developed)
 
-The older browser-based version is in the `sim/` directory. To run:
+```bash
+cd go
+go run ./cmd/aftograf
+```
+
+The Go version uses Fyne v2.5 for GUI. Requires a display server (X11/macOS/Wayland).
+
+Tests:
+
+```bash
+cd go
+go test ./...
+```
+
+### Browser Version (`sim/`)
+
+The legacy browser-based version:
 
 ```bash
 python3 -m http.server 8080
@@ -116,37 +122,43 @@ python3 -m http.server 8080
 ![Autograf-882 Debug Simulator (JS)](images/Aftograf-882-Debuger.png)
 *Browser-based debugger simulator (JavaScript)*
 
-
 ## Project Structure
 
 ```
 ├── rust/                  ← Rust native GUI (primary)
-│   ├── Cargo.toml        Package manifest
+│   ├── Cargo.toml
 │   ├── build.rs          Firmware embedder
-│   ├── TESTS.md          Test description
+│   ├── TESTS.md
 │   ├── src/
-│   │   ├── main.rs       Entry point + eframe window
-│   │   ├── app.rs        Main application (UI, stepping, I/O callbacks)
-│   │   ├── cpu.rs        Intel 8080 CPU emulator
-│   │   ├── memory.rs     MMU with ROM, RAM, I/O decode
+│   │   ├── main.rs
+│   │   ├── app.rs        UI, stepping, I/O callbacks
+│   │   ├── cpu.rs        Intel 8080 emulator
+│   │   ├── memory.rs     MMU: ROM + RAM + I/O decode
 │   │   ├── disasm.rs     Disassembler
-│   │   ├── plotter.rs    XY plotter simulation
+│   │   ├── plotter.rs    XY plotter
 │   │   ├── hpgl.rs       HPGL parser
 │   │   ├── ppi8255.rs    K580VV55A (PPI)
 │   │   ├── pit8253.rs    K580VI53 (PIT)
 │   │   ├── usart8251.rs  K580VV51A (USART)
 │   │   ├── settings.rs   Configuration
 │   │   └── session.rs    Save/load state
-│   └── assets/
-│       └── firmware.bin  24 KB firmware image
-├── sim/                   ← Browser-based version
-│   ├── index.html
-│   ├── styles.css
-│   ├── bundle.js
-│   ├── build.js
-│   ├── cpu8080.js
-│   ├── memory.js
-│   └── firmware.bin
+│   └── assets/firmware.bin
+├── go/                    ← Go native GUI (Fyne)
+│   ├── go.mod / go.sum
+│   ├── cmd/aftograf/main.go
+│   ├── pkg/
+│   │   ├── app/app.go    UI, layout, I/O routing
+│   │   ├── cpu/cpu.go    Intel 8080 emulator
+│   │   ├── memory/       MMU + tests
+│   │   ├── disasm/       Disassembler + tests
+│   │   ├── plotter/      XY plotter
+│   │   ├── hpgl/         HPGL parser
+│   │   ├── ppi8255/      PPI8255
+│   │   ├── pit8253/      PIT8253
+│   │   ├── usart8251/    USART8251
+│   │   └── settings/     Configuration
+│   └── assets/firmware.bin
+├── sim/                   ← Browser-based version (legacy)
 ├── docs/                  ← Documentation & datasheets
 ├── images/                ← Screenshots
 ├── *.hpgl                 ← Sample HPGL plot files
@@ -154,7 +166,7 @@ python3 -m http.server 8080
 └── CHECKPOINT.md          ← Development notes
 ```
 
-## Keyboard Shortcuts (Rust version)
+## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
@@ -162,9 +174,9 @@ python3 -m http.server 8080
 | `R` | Reset CPU |
 | `F5` | Run / Pause |
 | `B` | Toggle breakpoint at PC |
-| `J` | Jump PC to the address under cursor |
-| `?` / `/` | Open help overlay |
+| `?` | Open help (Go) / `?` / `/` (Rust) |
 | `Escape` | Close help/settings |
+| `J` | Jump PC (Rust only) |
 
 ## License
 
