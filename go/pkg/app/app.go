@@ -7,10 +7,11 @@ import (
 	"image/color"
 	"image/draw"
 	"io"
+	"sort"
 	"strconv"
-	"time"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -143,6 +144,9 @@ type AftografApp struct {
 	followPC    bool
 	disasmSrch  string
 	breakpoints map[uint16]bool
+	bpList  []uint16    // sorted breakpoint addresses (for display)
+	bpLbl   *fyne.Container // breakpoint list VBox (rebuilt on refresh)
+	bpPrev, bpNext *widget.Button // navigation
 	insnIndex  []uint16 // instruction start addresses (linear sweep)
 	pcInsnIdx  int      // index into insnIndex for current PC (or -1)
 	disasmList  *widget.List
@@ -234,7 +238,7 @@ func (a *AftografApp) Run() {
 			if a.regH != nil { a.regH.SetText(fmt.Sprintf("%02X", a.CPU.H)) }
 			if a.regL != nil { a.regL.SetText(fmt.Sprintf("%02X", a.CPU.L)) }
 			if a.followPC { a.disasmAddr = a.CPU.PC }
-			a.refreshDisasm(); a.refreshMem(); a.refreshStack()
+			a.refreshDisasm(); a.refreshMem(); a.refreshStack(); a.refreshBreakpoints()
 			time.Sleep(16 * time.Millisecond)
 		}
 		a.syncUI()
@@ -291,7 +295,7 @@ func (a *AftografApp) syncUI() {
 	if a.progBar != nil && a.HPGL != nil && len(a.HPGL.Segments) > 0 {
 		a.progBar.SetValue(float64(a.hpglStep) / float64(len(a.HPGL.Segments)))
 	}
-	a.refreshDisasm(); a.refreshMem(); a.refreshStack()
+	a.refreshDisasm(); a.refreshMem(); a.refreshStack(); a.refreshBreakpoints()
 }
 
 func (a *AftografApp) memJump(ad uint16) {
@@ -299,7 +303,8 @@ func (a *AftografApp) memJump(ad uint16) {
 	if a.memEntry != nil { a.memEntry.SetText(a.memSrch) }
 	if a.memList != nil {
 		id := int(a.memAddr / 16)
-		// Scroll so target address appears near TOP of viewport
+		// Scroll to beginning first so the target appears at TOP of viewport
+		a.memList.ScrollTo(0)
 		a.memList.ScrollTo(widget.ListItemID(id))
 	}
 }
@@ -413,7 +418,40 @@ func (a *AftografApp) refreshStack() {
 		}
 	}
 }
+func (a *AftografApp) refreshBreakpoints() {
+	if a.bpLbl == nil { return }
+	a.bpList = make([]uint16, 0, len(a.breakpoints))
+	for ad := range a.breakpoints { a.bpList = append(a.bpList, ad) }
+	sort.Slice(a.bpList, func(i, j int) bool { return a.bpList[i] < a.bpList[j] })
+	a.bpLbl.RemoveAll()
+	if len(a.bpList) == 0 {
+		a.bpLbl.Add(monoLabel("  (no breakpoints)"))
+	} else {
+		for _, ad := range a.bpList {
+			a2 := ad
+			row := container.NewHBox(
+				widget.NewButton(fmt.Sprintf("● %04X", ad), func() {
+					a.disasmAddr = a2; a.followPC = false
+					a.disasmSrch = fmt.Sprintf("%04X", a2)
+					a.memJump(a2)
+					a.refreshDisasm()
+				}),
+				widget.NewButton("✕", func() {
+					delete(a.breakpoints, a2)
+					a.refreshBreakpoints()
+					a.refreshDisasm()
+				}),
+			)
+			a.bpLbl.Add(row)
+		}
+	}
+	if a.bpPrev != nil || a.bpNext != nil {
+		hasPrevNext := len(a.bpList) >= 2
+		if a.bpPrev != nil { if hasPrevNext { a.bpPrev.Enable() } else { a.bpPrev.Disable() } }
+		if a.bpNext != nil { if hasPrevNext { a.bpNext.Enable() } else { a.bpNext.Disable() } }
+	}
 
+}
 func (a *AftografApp) clearPlot() {
 	a.Plot.Lines = nil; a.Plot.Reset(); a.HPGL = hpgl.New(); a.hpglStep = 0
 	if a.progBar != nil { a.progBar.SetValue(0) }; if a.plotRast != nil { a.plotRast.Refresh() }
@@ -498,6 +536,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 			if a.Running { a.Pause() } else { go a.Run() }
 		case fyne.KeyB:
 			a.breakpoints[a.CPU.PC] = !a.breakpoints[a.CPU.PC]
+			a.refreshBreakpoints()
 			a.refreshDisasm()
 		case fyne.KeySlash:
 			dialog.ShowInformation("Help",
@@ -667,9 +706,15 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 			a.uartLogE,
 		),
 	)
+	// Breakpoints panel
+	a.bpLbl = container.NewVBox()
+	bpScroll := container.NewScroll(a.bpLbl)
+	bpCard := widget.NewCard("Breakpoints", "", bpScroll)
+	a.refreshBreakpoints()
 	leftTabs := container.NewAppTabs(
 		container.NewTabItem("CPU", regCard),
 		container.NewTabItem("Stack", stackCard),
+		container.NewTabItem("BP", bpCard),
 	)
 	leftCol := container.New(layout.NewVBoxLayout(), leftTabs, usartB)
 	leftSc := container.NewScroll(leftCol)
@@ -679,6 +724,31 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	a.dsEntry.OnChanged = func(s string) { a.disasmSrch = s }
 	pcCheck := widget.NewCheck("PC", func(v bool) { a.followPC = v; if v { a.disasmAddr = a.CPU.PC; a.refreshDisasm() } })
 	a.pcCheck = pcCheck
+	// BP navigation buttons (create before HBox, reference inside)
+	a.bpPrev = widget.NewButton("◀", func() {
+		if len(a.bpList) < 2 { return }
+		cur := int(a.disasmAddr)
+		best := -1
+		for i := len(a.bpList) - 1; i >= 0; i-- {
+			if int(a.bpList[i]) < cur { best = i; break }
+		}
+		if best < 0 { best = len(a.bpList) - 1 }
+		a.disasmAddr = a.bpList[best]; a.followPC = false
+		a.disasmSrch = fmt.Sprintf("%04X", a.disasmAddr)
+		a.refreshDisasm(); a.memJump(a.disasmAddr)
+	})
+	a.bpNext = widget.NewButton("▶", func() {
+		if len(a.bpList) < 2 { return }
+		cur := int(a.disasmAddr)
+		best := -1
+		for i, ad := range a.bpList {
+			if int(ad) > cur { best = i; break }
+		}
+		if best < 0 { best = 0 }
+		a.disasmAddr = a.bpList[best]; a.followPC = false
+		a.disasmSrch = fmt.Sprintf("%04X", a.disasmAddr)
+		a.refreshDisasm(); a.memJump(a.disasmAddr)
+	})
 	dsNav := container.NewHBox(
 		monoLabel("Disasm"), a.dsEntry,
 		widget.NewButton("Go", func() {
@@ -704,6 +774,8 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 			}
 			a.mainWin.Clipboard().SetContent(sb.String())
 		}),
+		widget.NewSeparator(),
+		monoLabel("BP"), a.bpPrev, a.bpNext,
 	)
 	// Build initial instruction index so the list starts with correct count
 	a.insnIndex = disasm.BuildInsnIndex(func(aa uint16) uint8 { return a.MMU.Read(aa) })
