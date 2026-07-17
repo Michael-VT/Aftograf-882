@@ -8,6 +8,7 @@ import (
 	"image/draw"
 	"io"
 	"strconv"
+	"time"
 	"strings"
 	"sync"
 
@@ -32,14 +33,48 @@ import (
 
 const appVersion = "v1.0.15"
 
-// ───── helpers ─────
-
-func textLine(txt string) *canvas.Text {
-	t := canvas.NewText(txt, color.RGBA{200,200,200,255})
-	t.TextStyle = fyne.TextStyle{Monospace: true}
-	return t
+// ───── Compact layout (zero-spacing vertical) ─────
+type compactVBox struct{}
+func (c *compactVBox) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	y := float32(0)
+	for _, o := range objects {
+		if !o.Visible() { continue }
+		o.Resize(fyne.NewSize(size.Width, o.MinSize().Height))
+		o.Move(fyne.NewPos(0, y))
+		y += o.MinSize().Height
+	}
+}
+func (c *compactVBox) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	w, h := float32(0), float32(0)
+	for _, o := range objects {
+		if !o.Visible() { continue }
+		s := o.MinSize()
+		if s.Width > w { w = s.Width }
+		h += s.Height
+	}
+	return fyne.NewSize(w, h)
 }
 
+type compactHBox struct{}
+func (c *compactHBox) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	x := float32(0)
+	for _, o := range objects {
+		if !o.Visible() { continue }
+		o.Resize(o.MinSize())
+		o.Move(fyne.NewPos(x, 0))
+		x += o.MinSize().Width
+	}
+}
+func (c *compactHBox) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	w, h := float32(0), float32(0)
+	for _, o := range objects {
+		if !o.Visible() { continue }
+		s := o.MinSize()
+		w += s.Width
+		if s.Height > h { h = s.Height }
+	}
+	return fyne.NewSize(w, h)
+}
 func monoLabel(txt string) *widget.Label {
 	l := widget.NewLabel(txt)
 	l.TextStyle = fyne.TextStyle{Monospace: true}
@@ -53,9 +88,27 @@ func buttonLabel(txt string, fn func()) *widget.Button {
 	return b
 }
 
-// compactLabel is a monospace label compressed into a single container row.
-func compactLabel(txt string) *widget.Label { return monoLabel(txt) }
-
+// clickLabel is a left-aligned monospace label tappable like a button.
+// Overrides MinSize to remove Fyne's internal label padding for compact layout.
+type clickLabel struct {
+	widget.Label
+	onTap func()
+}
+func (c *clickLabel) Tapped(*fyne.PointEvent) {
+	if c.onTap != nil { c.onTap() }
+}
+func (c *clickLabel) MinSize() fyne.Size {
+	s := c.Label.MinSize()
+	return fyne.NewSize(s.Width, s.Height-4)
+}
+func newClickLabel(text string, fn func()) *clickLabel {
+	c := &clickLabel{onTap: fn}
+	c.Text = text
+	c.TextStyle = fyne.TextStyle{Monospace: true}
+	c.Wrapping = fyne.TextTruncate
+	c.ExtendBaseWidget(c)
+	return c
+}
 // ───── AftografApp ─────
 
 type AftografApp struct {
@@ -74,8 +127,10 @@ type AftografApp struct {
 	mainWin   fyne.Window
 	speedIdx  int
 
+	pcCheck  *widget.Check
 	// Registers: display + editable entries
 	regDisp [8]*widget.Label   // 0=A,1=BC,2=DE,3=HL,4=SP,5=PC,6=Flags,7=Cycles
+	regH, regL *widget.Entry
 	regEdit [6]*widget.Entry   // 0=A,1=B,2=C,3=D,4=E,5=SP
 	regBCb, regDEb, regHLb, regSPb *widget.Button
 	flagBtns [5]*widget.Button
@@ -88,15 +143,13 @@ type AftografApp struct {
 	followPC    bool
 	disasmSrch  string
 	breakpoints map[uint16]bool
-	disasmGrid  *fyne.Container
-	disasmScroll *container.Scroll
+	disasmList  *widget.List
 	dsEntry     *widget.Entry
 
 	// Memory viewer
 	memAddr   uint16
 	memSrch   string
-	memGrid   *fyne.Container
-	memScroll *container.Scroll
+	memList   *widget.List
 	memEntry  *widget.Entry
 
 	// USART log
@@ -145,14 +198,38 @@ func (a *AftografApp) outPort(p uint8, v uint8) {
 
 func (a *AftografApp) Step() {
 	if !a.RomLoaded || a.CPU.Halt { return }
-	a.Running = false; a.CPU.Step(); a.syncUI()
+	a.Running = false; a.CPU.Step()
+	a.followPC = true
+	a.syncUI()
 }
 func (a *AftografApp) Run() {
 	if a.Running || !a.RomLoaded || a.CPU.Halt { return }
 	a.Running = true; a.syncUI()
-	n := 10000
-	for i := 0; i < n && a.Running && !a.CPU.Halt; i++ { a.CPU.Step() }
-	a.Running = false; a.syncUI()
+	n := 5000
+	go func() {
+		defer func() { a.Running = false }()
+		for a.Running && !a.CPU.Halt {
+			for i := 0; i < n && a.Running && !a.CPU.Halt; i++ {
+				a.CPU.Step()
+				if a.breakpoints[a.CPU.PC] { a.Running = false; break }
+			}
+			// Update key labels from goroutine (Refresh/SetText are goroutine-safe in Fyne)
+			s := "RUN"; if a.CPU.Halt { s = "HLT" }
+			a.statusL.SetText(s)
+			a.regDisp[5].SetText(fmt.Sprintf("PC:%04X", a.CPU.PC))
+			a.regDisp[7].SetText(fmt.Sprintf("Cycles: %d", a.CPU.Cycles))
+			a.regBCb.SetText(fmt.Sprintf("BC:%04X", a.CPU.GetBC()))
+			a.regDEb.SetText(fmt.Sprintf("DE:%04X", a.CPU.GetDE()))
+			a.regHLb.SetText(fmt.Sprintf("HL:%04X", a.CPU.GetHL()))
+			a.regSPb.SetText(fmt.Sprintf("SP:%04X", a.CPU.SP))
+			if a.regH != nil { a.regH.SetText(fmt.Sprintf("%02X", a.CPU.H)) }
+			if a.regL != nil { a.regL.SetText(fmt.Sprintf("%02X", a.CPU.L)) }
+			if a.followPC { a.disasmAddr = a.CPU.PC }
+			a.refreshDisasm(); a.refreshMem(); a.refreshStack()
+			time.Sleep(16 * time.Millisecond)
+		}
+		a.syncUI()
+	}()
 }
 func (a *AftografApp) Pause() { a.Running = false }
 func (a *AftografApp) Reset() {
@@ -182,10 +259,13 @@ func (a *AftografApp) syncUI() {
 		a.flagBtns[i].Importance = widget.HighImportance; if !on { a.flagBtns[i].Importance = widget.MediumImportance }
 		a.flagBtns[i].Refresh()
 	}
-	a.regDisp[7].SetText(fmt.Sprintf("T:%d", a.CPU.Cycles))
+	if a.regH != nil { a.regH.SetText(fmt.Sprintf("%02X", a.CPU.H)) }
+	if a.regL != nil { a.regL.SetText(fmt.Sprintf("%02X", a.CPU.L)) }
+	a.regDisp[7].SetText(fmt.Sprintf("Cycles: %d", a.CPU.Cycles))
 	s := "STOP"; if a.Running { s = "RUN" }; if a.CPU.Halt { s = "HLT" }
 	a.statusL.SetText(s)
 	if a.followPC { a.disasmAddr = a.CPU.PC; a.disasmSrch = fmt.Sprintf("%04X", a.CPU.PC) }
+	if a.pcCheck != nil { a.pcCheck.SetChecked(a.followPC) }
 	// DIP LEDs
 	for i := 0; i < 8; i++ {
 		on := a.PPI1.A&(1<<uint(i)) != 0
@@ -201,11 +281,9 @@ func (a *AftografApp) syncUI() {
 
 func (a *AftografApp) memJump(ad uint16) {
 	a.memAddr = ad & 0xFFF0; a.memSrch = fmt.Sprintf("%04X", a.memAddr)
-	if a.memEntry != nil { a.memEntry.SetText(a.memSrch) }; a.refreshMem()
+	if a.memEntry != nil { a.memEntry.SetText(a.memSrch) }
+	if a.memList != nil { a.memList.ScrollTo(widget.ListItemID(a.memAddr / 16)) }
 }
-
-// ───── Session save/load ─────
-
 type sessionData struct {
 	CPU     cpuState `json:"cpu"`
 	BPs     []uint16 `json:"breakpoints"`
@@ -227,6 +305,19 @@ type cpuState struct {
 	Cycles uint64 `json:"cycles"`
 	Halt   bool   `json:"halt"`
 }
+func memColor(addr uint16) color.RGBA {
+	switch {
+	case addr <= 0x5FFF:
+		return color.RGBA{180, 160, 120, 255}
+	case addr >= 0x6000 && addr <= 0x67FF:
+		return color.RGBA{200, 180, 60, 255}
+	case addr >= 0xE000 && addr <= 0xEFFF:
+		return color.RGBA{160, 100, 200, 255}
+	default:
+		return color.RGBA{100, 100, 100, 255}
+	}
+}
+
 
 func (a *AftografApp) saveSession() {
 	s := sessionData{
@@ -256,127 +347,35 @@ func (a *AftografApp) loadSession() {
 		if err != nil || r == nil { return }
 		defer r.Close()
 		data, _ := io.ReadAll(r)
+
 		var s sessionData
-		if json.Unmarshal(data, &s) != nil { return }
-		a.CPU.A, a.CPU.B, a.CPU.C = s.CPU.A, s.CPU.B, s.CPU.C
-		a.CPU.D, a.CPU.E, a.CPU.H, a.CPU.L = s.CPU.D, s.CPU.E, s.CPU.H, s.CPU.L
-		a.CPU.SP, a.CPU.PC, a.CPU.Flags = s.CPU.SP, s.CPU.PC, s.CPU.Flags
-		a.CPU.Cycles, a.CPU.Halt = s.CPU.Cycles, s.CPU.Halt
-		a.memAddr, a.disasmAddr = s.MemAddr, s.DisAddr
+		if err := json.Unmarshal(data, &s); err != nil { return }
+		a.CPU.A = s.CPU.A; a.CPU.B = s.CPU.B; a.CPU.C = s.CPU.C
+		a.CPU.D = s.CPU.D; a.CPU.E = s.CPU.E; a.CPU.H = s.CPU.H; a.CPU.L = s.CPU.L
+		a.CPU.SP = s.CPU.SP; a.CPU.PC = s.CPU.PC
+		a.CPU.Flags = s.CPU.Flags; a.CPU.Cycles = s.CPU.Cycles; a.CPU.Halt = s.CPU.Halt
+		a.memAddr = s.MemAddr; a.disasmAddr = s.DisAddr
 		a.breakpoints = make(map[uint16]bool)
-		for _, ad := range s.BPs { a.breakpoints[ad] = true }
+		for _, bp := range s.BPs { a.breakpoints[bp] = true }
 		a.syncUI()
 	}, a.mainWin)
 }
-
-// ───── Disassembler ─────
-
 func (a *AftografApp) refreshDisasm() {
-	if a.disasmGrid == nil { return }
-	a.disasmGrid.RemoveAll()
-	pc := a.CPU.PC
-	start := pc; if start > 0x20 { start -= 0x20 }
-	addr, pcIdx, row := start, -1, 0
-	for row < 50 && addr < 0xFFF0 {
-		insns := disasm.Disassemble(addr, func(aa uint16) uint8 { return a.MMU.Read(aa) })
-		for _, ins := range insns {
-			if ins.Length == 0 { addr += 2; break }
-			if row >= 50 { break }
-			_, hasBP := a.breakpoints[ins.Address]
-			marker := " "; if ins.Address == pc { marker = "→"; pcIdx = row }
-			var hx string; for _, b := range ins.Bytes { hx += fmt.Sprintf("%02X ", b) }
-			// BP toggle button (colored dot)
-			bpLbl := "  "; if hasBP { bpLbl = "●" }
-			bpBtn := widget.NewButton(bpLbl, func() {
-				if hasBP { delete(a.breakpoints, ins.Address) } else { a.breakpoints[ins.Address] = true }
-				a.refreshDisasm()
-			})
-			bpBtn.Importance = widget.LowImportance
-			// PC marker
-			mkLbl := marker
-			// Address click → jump
-			addrBtn := widget.NewButton(fmt.Sprintf("%04X", ins.Address), func() {
-				a.disasmAddr = ins.Address; a.followPC = false
-				a.disasmSrch = fmt.Sprintf("%04X", ins.Address)
-				a.memJump(ins.Address); a.refreshDisasm()
-			})
-			addrBtn.Importance = widget.LowImportance
-			// Bytes + mnemonic as plain text
-			rest := textLine(fmt.Sprintf(" %-8s %s", hx, ins.Mnemonic))
-			rowC := container.NewHBox(bpBtn, monoLabel(mkLbl), addrBtn, rest)
-			a.disasmGrid.Add(rowC)
-			row++; addr = ins.Address + uint16(ins.Length)
-		}
-	}
-	if pcIdx == -1 && a.followPC { a.disasmAddr = pc; a.refreshDisasm(); return }
-	a.disasmGrid.Refresh()
+	if a.disasmList == nil { return }
+	// 1. Scroll to correct position FIRST
+	target := a.disasmAddr / 2
+	if a.followPC { target = a.CPU.PC / 2 }
+	// Center in the visible area (estimate ~16 items visible)
+	if target > 8 { target -= 8 } else { target = 0 }
+	a.disasmList.ScrollTo(widget.ListItemID(target))
+	// 2. THEN refresh so visible items get UpdateItem at the new position
+	a.disasmList.Refresh()
 }
-
-// memColor returns hex-color string for a memory address (ROM/RAM/I/O).
-func memColor(addr uint16) color.RGBA {
-	switch {
-	case addr <= memory.RomEnd:
-		return color.RGBA{180, 160, 120, 255} // brown/ROM
-	case addr >= memory.RamStart && addr <= memory.RamEnd:
-		return color.RGBA{200, 180, 60, 255} // gold/RAM
-	case addr >= memory.PPI1Base && addr <= memory.UARTEnd:
-		return color.RGBA{160, 100, 200, 255} // purple/I/O
-	default:
-		return color.RGBA{100, 100, 100, 255} // grey/unmapped
-	}
-}
-
 func (a *AftografApp) refreshMem() {
-	if a.memGrid == nil { return }
-	a.memGrid.RemoveAll()
-	emptyCol := color.RGBA{80, 80, 80, 255}
-	for r := 0; r < 32; r++ {
-		base := a.memAddr + uint16(r)*16
-		// Address label (clickable → jump to this row)
-		addrC := memColor(base)
-		addrT := canvas.NewText(fmt.Sprintf("%04X", base), addrC)
-		addrT.TextStyle = fyne.TextStyle{Monospace: true}
-		addrBtn := widget.NewButton("", func() { a.memJump(base) })
-		addrBtn.Importance = widget.LowImportance
-		// Build byte row
-		row := container.NewHBox(addrBtn, addrT)
-		for c := 0; c < 16; c++ {
-			ad := base + uint16(c)
-			v := a.MMU.Peek(ad)
-			cC := memColor(ad)
-			valS := fmt.Sprintf("%02X", v)
-			valB := widget.NewButton(valS, func() {
-				dialog.ShowEntryDialog("Edit byte", fmt.Sprintf("New value for $%04X (hex):", ad),
-					func(s string) {
-						if v, e := strconv.ParseUint(s, 16, 8); e == nil {
-							a.MMU.Poke(ad, uint8(v))
-							a.refreshMem()
-						}
-					}, a.mainWin)
-			})
-			valB.Importance = widget.LowImportance
-			// Color via a tiny square before the button
-			dot := canvas.NewCircle(cC)
-			dot.Resize(fyne.NewSize(4, 4))
-			row.Add(dot)
-			row.Add(valB)
-		}
-		// ASCII column
-		sep := canvas.NewText(" |", emptyCol)
-		sep.TextStyle = fyne.TextStyle{Monospace: true}
-		row.Add(sep)
-		for c := 0; c < 16; c++ {
-			v := a.MMU.Peek(base + uint16(c))
-			ch := "."
-			if v >= 32 && v <= 126 { ch = string(rune(v)) }
-			t := canvas.NewText(ch, emptyCol)
-			t.TextStyle = fyne.TextStyle{Monospace: true}
-			row.Add(t)
-		}
-		a.memGrid.Add(row)
-	}
-	a.memGrid.Refresh()
+	if a.memList == nil { return }
+	a.memList.Refresh()
 }
+
 func (a *AftografApp) refreshStack() {
 	sp := a.CPU.SP
 	for i := range a.stackLbl {
@@ -484,7 +483,6 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		}
 	})
 	mono := fyne.TextStyle{Monospace: true}
-
 	// ── Toolbar ──
 	a.statusL = widget.NewLabel("STOP")
 	spdW := widget.NewSelect([]string{"1×","10×","100×","1K×","10K×","100K×"}, func(s string) {
@@ -512,40 +510,34 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 					"F5 : Run/Pause\n"+
 					"B : Toggle breakpoint at PC\n"+
 					"? : This help\n\n"+
-					"CPU: Click register buttons to jump to address\n"+
-					"Disasm: Click address to jump, ● to toggle breakpoint\n"+
-					"Memory: Click byte to edit, address to jump\n"+
-					"Copy: Copy visible disassembly to clipboard",
+					"CPU: Click button to jump to address\n"+
+					"Disasm: Click row to jump, ● for BP\n"+
+					"Memory: Click row to jump",
 				a.mainWin)
 		}),
 	)
-
-	// ── LEFT: Registers (compact grid) ──
 	buttonLabel := func(txt string, fn func()) *widget.Button {
 		b := widget.NewButton(txt, fn); b.Importance = widget.LowImportance; return b
 	}
-	a.regBCb = buttonLabel("BC:----", func() { a.memJump(a.CPU.GetBC()) })
-	a.regDEb = buttonLabel("DE:----", func() { a.memJump(a.CPU.GetDE()) })
-	a.regHLb = buttonLabel("HL:----", func() { a.memJump(a.CPU.GetHL()) })
-	a.regSPb = buttonLabel("SP:----", func() { a.memJump(a.CPU.SP) })
+	a.regBCb = buttonLabel("BC:", func() { a.memJump(a.CPU.GetBC()) })
+	a.regDEb = buttonLabel("DE:", func() { a.memJump(a.CPU.GetDE()) })
+	a.regHLb = buttonLabel("HL:", func() { a.memJump(a.CPU.GetHL()) })
+	a.regSPb = buttonLabel("SP:", func() { a.memJump(a.CPU.SP) })
 	for i := 0; i < 8; i++ { a.regDisp[i] = monoLabel("") }
-	a.regDisp[0].SetText("A:--"); a.regDisp[5].SetText("PC:----")
 
-	// Constrained entry for hex editing — Wraps in HBox+Spacer to limit width
+	// Editable hex entries
 	mkHexEntry := func(init string) *widget.Entry {
 		e := widget.NewEntry()
 		e.Text = init; e.TextStyle = fyne.TextStyle{Monospace: true}
 		return e
 	}
-	// Register edit entries [0]=A [1]=B [2]=C [3]=D [4]=E [5]=SP
 	for i := range a.regEdit { a.regEdit[i] = nil }
-	a.regEdit[0] = mkHexEntry("00")
-	a.regEdit[1] = mkHexEntry("00")
-	a.regEdit[2] = mkHexEntry("00")
-	a.regEdit[3] = mkHexEntry("00")
-	a.regEdit[4] = mkHexEntry("00")
-	a.regEdit[5] = mkHexEntry("0000")
-	// Wire OnSubmitted to apply register values
+	a.regEdit[0] = mkHexEntry("00") // A
+	a.regEdit[1] = mkHexEntry("00") // B
+	a.regEdit[2] = mkHexEntry("00") // C
+	a.regEdit[3] = mkHexEntry("00") // D
+	a.regEdit[4] = mkHexEntry("00") // E
+	a.regEdit[5] = mkHexEntry("0000") // SP
 	a.regEdit[0].OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.A = uint8(v); a.syncUI() } }
 	a.regEdit[1].OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.B = uint8(v); a.syncUI() } }
 	a.regEdit[2].OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.C = uint8(v); a.syncUI() } }
@@ -553,50 +545,60 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	a.regEdit[4].OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.E = uint8(v); a.syncUI() } }
 	a.regEdit[5].OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.SP = uint16(v); a.syncUI() } }
 
-	// Build rows: use GridLayout(2) for paired columns, entries constrained by Border+Spacer
-	entRow := func(label string, e *widget.Entry) *fyne.Container {
-		return container.NewBorder(nil, nil, nil, layout.NewSpacer(), container.NewHBox(monoLabel(label), e))
-	}
-	regBox := container.New(layout.NewVBoxLayout(),
-		container.NewGridWithColumns(2,
-			entRow("A:", a.regEdit[0]),
-			a.regBCb,
-		),
-		container.NewGridWithColumns(2,
-			entRow("B:", a.regEdit[1]),
-			entRow("C:", a.regEdit[2]),
-		),
-		container.NewGridWithColumns(2,
-			entRow("D:", a.regEdit[3]),
-			entRow("E:", a.regEdit[4]),
-		),
-		container.NewGridWithColumns(2,
-			a.regHLb,
-			entRow("SP:", a.regEdit[5]),
-		),
-		container.NewGridWithColumns(2,
-			a.regDisp[5],
-			a.regDisp[7],
-		),
-		container.NewHBox(monoLabel("F:"), widget.NewButton("PC→", func() { a.memJump(a.CPU.PC) })),
-	)
-	// Flag buttons
-	fbits := []uint8{cpu.FlagS,cpu.FlagZ,cpu.FlagAC,cpu.FlagP,cpu.FlagCY}
-	for i, fb := range []string{"S","Z","AC","P","CY"} {
+	regBox := container.New(&compactVBox{})
+	// Row 1: A
+	regBox.Add(container.New(&compactHBox{},
+		monoLabel("A:"), a.regEdit[0],
+	))
+	// Row 2: BC pair
+	regBox.Add(container.New(&compactHBox{},
+		a.regBCb,
+		monoLabel("B:"), a.regEdit[1],
+		monoLabel("C:"), a.regEdit[2],
+	))
+	// Row 3: DE pair
+	regBox.Add(container.New(&compactHBox{},
+		a.regDEb,
+		monoLabel("D:"), a.regEdit[3],
+		monoLabel("E:"), a.regEdit[4],
+	))
+	// Row 4: HL pair
+	a.regH = mkHexEntry("00")
+	a.regL = mkHexEntry("00")
+	a.regH.OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.H = uint8(v); a.syncUI() } }
+	a.regL.OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.L = uint8(v); a.syncUI() } }
+	regBox.Add(container.New(&compactHBox{},
+		a.regHLb,
+		monoLabel("H:"), a.regH,
+		monoLabel("L:"), a.regL,
+	))
+	// Row 5: SP button + entry + PC label (regDisp[5] already shows "PC:XXXX")
+	regBox.Add(container.New(&compactHBox{},
+		a.regSPb, a.regEdit[5], a.regDisp[5],
+	))
+	// Row 6: Cycles (regDisp[7] shows "Cycles: 0")
+	regBox.Add(container.New(&compactHBox{},
+		a.regDisp[7],
+	))
+	// Row 7: Flags — horizontal buttons
+	fbits := []uint8{cpu.FlagS, cpu.FlagZ, cpu.FlagAC, cpu.FlagP, cpu.FlagCY}
+	flagRow := container.New(&compactHBox{})
+	for i, fb := range []string{"S", "Z", "AC", "P", "CY"} {
 		idx := i
 		a.flagBtns[i] = widget.NewButton(fb, func() { a.CPU.Flags ^= fbits[idx]; a.CPU.Flags |= 2; a.syncUI() })
 		a.flagBtns[i].Importance = widget.MediumImportance
-		regBox.Add(a.flagBtns[i])
+		flagRow.Add(a.flagBtns[i])
 	}
-	// DIP LEDs
+	regBox.Add(flagRow)
+	// Row 8: DIP LEDs (D7-D0)
 	a.dipLEDs = make([]*canvas.Circle, 8)
-	dipR := container.NewHBox(monoLabel("D7-D0:"))
+	dipRow := container.New(&compactHBox{}, monoLabel("D7-D0:"))
 	for i := 7; i >= 0; i-- {
-		a.dipLEDs[i] = canvas.NewCircle(color.RGBA{40,40,40,255})
-		a.dipLEDs[i].Resize(fyne.NewSize(8,8))
-		dipR.Add(a.dipLEDs[i])
+		a.dipLEDs[i] = canvas.NewCircle(color.RGBA{40, 40, 40, 255})
+		a.dipLEDs[i].Resize(fyne.NewSize(7, 7))
+		dipRow.Add(a.dipLEDs[i])
 	}
-	regBox.Add(dipR)
+	regBox.Add(dipRow)
 	regCard := widget.NewCard("CPU", "", regBox)
 
 	// Stack
@@ -640,7 +642,6 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 			a.uartLogE,
 		),
 	)
-
 	leftTabs := container.NewAppTabs(
 		container.NewTabItem("CPU", regCard),
 		container.NewTabItem("Stack", stackCard),
@@ -651,18 +652,20 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	// ── CENTER: Disassembler ──
 	a.dsEntry = widget.NewEntry(); a.dsEntry.Text = a.disasmSrch; a.dsEntry.TextStyle = mono
 	a.dsEntry.OnChanged = func(s string) { a.disasmSrch = s }
+	pcCheck := widget.NewCheck("PC", func(v bool) { a.followPC = v; if v { a.disasmAddr = a.CPU.PC; a.refreshDisasm() } })
+	a.pcCheck = pcCheck
 	dsNav := container.NewHBox(
 		monoLabel("Disasm"), a.dsEntry,
 		widget.NewButton("Go", func() {
 			if v, e := strconv.ParseUint(a.disasmSrch, 16, 16); e == nil { a.disasmAddr = uint16(v); a.followPC = false; a.refreshDisasm() }
 		}),
-		widget.NewButton("◀", func() { if a.disasmAddr >= 0x10 { a.disasmAddr -= 0x10 }; a.refreshDisasm() }),
-		widget.NewButton("▶", func() { a.disasmAddr += 0x10; a.refreshDisasm() }),
-		widget.NewCheck("PC", func(v bool) { a.followPC = v; if v { a.disasmAddr = a.CPU.PC; a.refreshDisasm() } }),
+		widget.NewButton("◀", func() { if a.disasmAddr >= 0x40 { a.disasmAddr -= 0x40 } else { a.disasmAddr = 0 }; a.followPC = false; a.refreshDisasm() }),
+		widget.NewButton("▶", func() { a.disasmAddr += 0x40; a.followPC = false; a.refreshDisasm() }),
+		pcCheck,
 		widget.NewButton("Copy", func() {
 			var sb strings.Builder
 			ad, r := a.disasmAddr, 0
-			for r < 80 && ad < 0xFFF0 {
+			for r < 80 && uint32(ad) < 0x10000 {
 				insns := disasm.Disassemble(ad, func(aa uint16) uint8 { return a.MMU.Read(aa) })
 				for _, ins := range insns {
 					if ins.Length == 0 { ad += 2; break }
@@ -677,9 +680,46 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 			a.mainWin.Clipboard().SetContent(sb.String())
 		}),
 	)
-	a.disasmGrid = container.New(layout.NewVBoxLayout())
-	a.disasmScroll = container.NewScroll(a.disasmGrid)
-	dsCard := widget.NewCard("Disassembler", "", container.NewBorder(dsNav, nil, nil, nil, a.disasmScroll))
+	// Disassembler — virtual-scroll list through all 64KB
+	textItem := func() fyne.CanvasObject {
+		t := canvas.NewText("", color.RGBA{200, 200, 200, 255})
+		t.TextStyle = fyne.TextStyle{Monospace: true}
+		return t
+	}
+	a.disasmList = widget.NewList(
+		func() int { return 32768 },
+		textItem,
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			addr := uint16(id) * 2
+			if uint32(addr) >= 0x10000 { return }
+			insns := disasm.Disassemble(addr, func(aa uint16) uint8 { return a.MMU.Read(aa) })
+			if len(insns) == 0 { return }
+			ins := insns[0]
+			pc := a.CPU.PC
+			// Check if PC falls within this instruction's address range
+			insEnd := ins.Address + uint16(ins.Length)
+			isPC := pc >= ins.Address && pc < insEnd
+			_, hasBP := a.breakpoints[ins.Address]
+			marker := " "; if isPC { marker = "→" }
+			var hx string; for _, b := range ins.Bytes { hx += fmt.Sprintf("%02X ", b) }
+			bpStr := "  "; if hasBP { bpStr = "●" }
+			t := obj.(*canvas.Text)
+			t.Text = fmt.Sprintf("%s%s%04X  %-8s %s", bpStr, marker, ins.Address, hx, ins.Mnemonic)
+			if isPC {
+				t.Color = color.RGBA{125, 207, 255, 255} // cyan for current
+			} else {
+				t.Color = color.RGBA{200, 200, 200, 255}
+			}
+			t.Refresh()
+		},
+	)
+	a.disasmList.OnSelected = func(id widget.ListItemID) {
+		addr := uint16(id) * 2
+		a.disasmAddr = addr; a.followPC = false
+		a.disasmSrch = fmt.Sprintf("%04X", addr)
+		a.memJump(addr)
+	}
+	dsCard := widget.NewCard("Disassembler", "", container.NewBorder(dsNav, nil, nil, nil, a.disasmList))
 
 	// CENTER: Memory
 	a.memEntry = widget.NewEntry(); a.memEntry.Text = a.memSrch; a.memEntry.TextStyle = mono
@@ -689,13 +729,43 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		widget.NewButton("Go", func() {
 			if v, e := strconv.ParseUint(a.memSrch, 16, 16); e == nil { a.memJump(uint16(v)) }
 		}),
-		widget.NewButton("◀", func() { if a.memAddr >= 0x100 { a.memJump(a.memAddr-0x100) } }),
-		widget.NewButton("▶", func() { a.memJump(a.memAddr+0x100) }),
+		widget.NewButton("◀", func() { if a.memAddr >= 0x400 { a.memJump(a.memAddr-0x400) } else { a.memJump(0) } }),
+		widget.NewButton("▶", func() { a.memJump(a.memAddr+0x400) }),
 		widget.NewButton("HL", func() { a.memJump(a.CPU.GetHL()) }),
 	)
-	a.memGrid = container.New(layout.NewVBoxLayout())
-	a.memScroll = container.NewScroll(a.memGrid)
-	memCard := widget.NewCard("Memory", "", container.NewBorder(memNav, nil, nil, nil, a.memScroll))
+	// Memory — virtual-scroll list through all 64KB
+	a.memList = widget.NewList(
+		func() int { return 4096 },
+		func() fyne.CanvasObject {
+			t := canvas.NewText("", color.RGBA{200, 200, 200, 255})
+			t.TextStyle = fyne.TextStyle{Monospace: true}
+			return t
+		},
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			base := uint16(id) * 16
+			var hexSb strings.Builder
+			for c := range 16 {
+				if c == 8 { hexSb.WriteString("  ")
+				} else if c > 0 { hexSb.WriteByte(' ') }
+				fmt.Fprintf(&hexSb, "%02X", a.MMU.Peek(base+uint16(c)))
+			}
+			var asciiSb strings.Builder
+			for c := range 16 {
+				v := a.MMU.Peek(base + uint16(c))
+				if v >= 32 && v <= 126 { asciiSb.WriteByte(v) } else { asciiSb.WriteByte('.') }
+			}
+			t := obj.(*canvas.Text)
+			t.Text = fmt.Sprintf("%04X  %s  |%s|", base, hexSb.String(), asciiSb.String())
+			// Color by region
+			c := memColor(base)
+			t.Color = c
+			t.Refresh()
+		},
+	)
+	a.memList.OnSelected = func(id widget.ListItemID) {
+		a.memJump(uint16(id) * 16)
+	}
+	memCard := widget.NewCard("Memory", "", container.NewBorder(memNav, nil, nil, nil, a.memList))
 
 	center := container.NewVSplit(dsCard, memCard); center.SetOffset(0.55)
 

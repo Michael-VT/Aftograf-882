@@ -90,8 +90,6 @@ pub struct AftografApp {
 
     // Memory viewer
     pub mem_scroll_addr: u16,
-    pub mem_edit_addr: Option<u16>,
-    pub mem_edit_buf: String,
     pub mem_scroll_target: Option<u16>,
     pub hl_addr: u16,
 
@@ -125,6 +123,7 @@ pub struct AftografApp {
 
     // Optable for disasm
     pub optable: Vec<(u8, &'static str, u8, u8)>,
+    pub disasm_split: f32,
 
     // Register edit buffers
     pub reg_edit_a: String,
@@ -174,8 +173,6 @@ impl AftografApp {
             disasm_addr: 0,
             asm_hover_addr: None,
             mem_scroll_addr: 0,
-            mem_edit_addr: None,
-            mem_edit_buf: String::new(),
             plotter_scale: 1.0,
             plotter_min_x: 0,
             plotter_max_x: 0,
@@ -195,6 +192,7 @@ impl AftografApp {
             frame_counter: 0,
             rom_offset: 0,
             optable,
+            disasm_split: 0.50,
             reg_edit_a: format!("${:02X}", 0u8),
             reg_edit_b: format!("${:02X}", 0u8),
             reg_edit_c: format!("${:02X}", 0u8),
@@ -547,89 +545,112 @@ impl AftografApp {
         egui::ScrollArea::vertical()
             .id_source("left_scroll")
             .show(ui, |ui| {
+                ui.style_mut().spacing.item_spacing.y = 1.0;
+                ui.style_mut().spacing.item_spacing.x = 2.0;
                 // ── Registers ──
                 ui.collapsing("CPU", |ui| {
+                    ui.style_mut().spacing.item_spacing.x = 3.0;
+                    // Accumulator A
                     ui.horizontal(|ui| {
-                        ui.label("A:");
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_a).desired_width(30.0).font(egui::TextStyle::Monospace));
+                        ui.colored_label(egui::Color32::from_rgb(125, 207, 255), "A:");
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_a).desired_width(28.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
                             if let Ok(v) = u8::from_str_radix(self.reg_edit_a.trim_start_matches("$").trim_start_matches("0x"), 16) { self.cpu.a = v; }
                             self.reg_edit_a = format!("${:02X}", self.cpu.a);
                         }
                     });
+                    // BC pair
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Label::new("BC:").sense(egui::Sense::click())).clicked() {
+                        let bc_label = ui.add(egui::Label::new(
+                            egui::RichText::new("BC:").color(egui::Color32::from_rgb(255, 200, 100)).strong()
+                        ).sense(egui::Sense::click()));
+                        if bc_label.clicked() {
                             self.mem_scroll_addr = self.cpu.get_bc() & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
                             self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                         }
                         ui.label("B:");
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_b).desired_width(30.0).font(egui::TextStyle::Monospace));
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_b).desired_width(22.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
                             if let Ok(v) = u8::from_str_radix(self.reg_edit_b.trim_start_matches("$").trim_start_matches("0x"), 16) { self.cpu.b = v; }
                             self.reg_edit_b = format!("${:02X}", self.cpu.b);
                         }
                         ui.label("C:");
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_c).desired_width(30.0).font(egui::TextStyle::Monospace));
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_c).desired_width(22.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
                             if let Ok(v) = u8::from_str_radix(self.reg_edit_c.trim_start_matches("$").trim_start_matches("0x"), 16) { self.cpu.c = v; }
                             self.reg_edit_c = format!("${:02X}", self.cpu.c);
                         }
                     });
+                    // DE pair
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Label::new("DE:").sense(egui::Sense::click())).clicked() {
+                        let de_label = ui.add(egui::Label::new(
+                            egui::RichText::new("DE:").color(egui::Color32::from_rgb(255, 200, 100)).strong()
+                        ).sense(egui::Sense::click()));
+                        if de_label.clicked() {
                             self.mem_scroll_addr = self.cpu.get_de() & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
                             self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                         }
                         ui.label("D:");
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_d).desired_width(30.0).font(egui::TextStyle::Monospace));
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_d).desired_width(22.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
                             if let Ok(v) = u8::from_str_radix(self.reg_edit_d.trim_start_matches("$").trim_start_matches("0x"), 16) { self.cpu.d = v; }
                             self.reg_edit_d = format!("${:02X}", self.cpu.d);
                         }
                         ui.label("E:");
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_e).desired_width(30.0).font(egui::TextStyle::Monospace));
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_e).desired_width(22.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
                             if let Ok(v) = u8::from_str_radix(self.reg_edit_e.trim_start_matches("$").trim_start_matches("0x"), 16) { self.cpu.e = v; }
                             self.reg_edit_e = format!("${:02X}", self.cpu.e);
                         }
                     });
+                    // HL pair
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Label::new("HL:").sense(egui::Sense::click())).clicked() {
+                        let hl_label = ui.add(egui::Label::new(
+                            egui::RichText::new("HL:").color(egui::Color32::from_rgb(255, 200, 100)).strong()
+                        ).sense(egui::Sense::click()));
+                        if hl_label.clicked() {
                             self.mem_scroll_addr = self.cpu.get_hl() & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
                             self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                         }
                         ui.label("H:");
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_h).desired_width(30.0).font(egui::TextStyle::Monospace));
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_h).desired_width(22.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
                             if let Ok(v) = u8::from_str_radix(self.reg_edit_h.trim_start_matches("$").trim_start_matches("0x"), 16) { self.cpu.h = v; }
                             self.reg_edit_h = format!("${:02X}", self.cpu.h);
                         }
                         ui.label("L:");
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_l).desired_width(30.0).font(egui::TextStyle::Monospace));
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_l).desired_width(22.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
                             if let Ok(v) = u8::from_str_radix(self.reg_edit_l.trim_start_matches("$").trim_start_matches("0x"), 16) { self.cpu.l = v; }
                             self.reg_edit_l = format!("${:02X}", self.cpu.l);
                         }
                     });
+                    // SP + PC in one line
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Label::new("SP:").sense(egui::Sense::click())).clicked() {
+                        let sp_label = ui.add(egui::Label::new(
+                            egui::RichText::new("SP:").color(egui::Color32::from_rgb(255, 200, 100)).strong()
+                        ).sense(egui::Sense::click()));
+                        if sp_label.clicked() {
                             self.mem_scroll_addr = self.cpu.sp & 0xFFF0;
                             self.mem_search = format!("{:04X}", self.mem_scroll_addr);
                             self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
                         }
-                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_sp).desired_width(50.0).font(egui::TextStyle::Monospace));
+                        let r = ui.add(egui::TextEdit::singleline(&mut self.reg_edit_sp).desired_width(42.0).font(egui::TextStyle::Monospace));
                         if r.lost_focus() {
                             if let Ok(v) = u16::from_str_radix(self.reg_edit_sp.trim_start_matches("$").trim_start_matches("0x"), 16) { self.cpu.sp = v; }
                             self.reg_edit_sp = format!("${:04X}", self.cpu.sp);
                         }
+                        ui.separator();
+                        ui.colored_label(egui::Color32::from_rgb(125, 207, 255), "PC:");
+                        ui.monospace(format!("${:04X}", self.cpu.pc));
                     });
+                    // Cycles and stack peek
                     ui.horizontal(|ui| {
                         ui.label(format!("Cycles: {}", self.cpu.cycles));
-                    });
-                    ui.horizontal(|ui| {
+                        ui.separator();
                         ui.label("Stack:");
                         for i in 0..4 {
                             let addr = self.cpu.sp.wrapping_add(i * 2);
@@ -656,7 +677,7 @@ impl AftografApp {
                             } else {
                                 egui::Button::new(*label)
                             };
-                            if ui.add_sized([28.0, 20.0], btn).clicked() {
+                            if ui.add_sized([26.0, 18.0], btn).clicked() {
                                 self.cpu.flags ^= bit;
                                 self.cpu.flags |= 0x02;
                             }
@@ -665,25 +686,43 @@ impl AftografApp {
                 });
                 // ── Sensors (DIP switches + End stops) ──
                 ui.collapsing("Sensors", |ui| {
-                    ui.label("DIP (D7-D4)");
+                    ui.label("Data Bus (D7-D0):");
+                    ui.horizontal(|ui| {
+                        for bit in (0..=7).rev() {
+                            let val = (self.ppi1.port_a >> bit) & 1;
+                            let label = format!("D{bit}");
+                            if val != 0 {
+                                ui.colored_label(egui::Color32::GREEN, label);
+                            } else {
+                                ui.colored_label(egui::Color32::DARK_GRAY, label);
+                            }
+                            if bit == 4 {
+                                ui.separator();
+                            }
+                        }
+                    });
+                    ui.separator();
+                    ui.label("DIP switches (D7-D4):");
                     ui.horizontal(|ui| {
                         for bit in (4..=7).rev() {
                             let val = (self.ppi1.port_a >> bit) & 1;
                             let mut checked = val != 0;
-                            if ui.toggle_value(&mut checked, format!("{}", bit - 3)).clicked() {
+                            if ui.toggle_value(&mut checked, format!("SW{}", bit - 3)).clicked() {
                                 if checked { self.ppi1.port_a |= 1 << bit; }
                                 else { self.ppi1.port_a &= !(1 << bit); }
                             }
                         }
                     });
-                    ui.label("END (D3-D0)");
+                    ui.separator();
+                    ui.label("End stops (D3-D0):");
                     ui.horizontal(|ui| {
                         for bit in (0..=3).rev() {
                             let val = (self.ppi1.port_a >> bit) & 1;
-                            let mut checked = val != 0;
-                            if ui.toggle_value(&mut checked, format!("{bit}")).clicked() {
-                                if checked { self.ppi1.port_a |= 1 << bit; }
-                                else { self.ppi1.port_a &= !(1 << bit); }
+                            let label = format!("END{}", bit + 1);
+                            if val != 0 {
+                                ui.colored_label(egui::Color32::RED, label);
+                            } else {
+                                ui.colored_label(egui::Color32::DARK_GRAY, label);
                             }
                         }
                     });
@@ -893,16 +932,18 @@ impl AftografApp {
 
     fn ui_center_panel(&mut self, ui: &mut egui::Ui) {
         let avail = ui.available_height();
-        let disasm_height = (avail * 0.55).max(150.0);
-        // ── Disassembler (top 55%) ──
+        let min_disasm = 100.0;
+        let min_mem = 80.0;
+        let max_disasm = avail - min_mem;
+        let disasm_px = (avail * self.disasm_split).clamp(min_disasm, max_disasm);
 
-        // ── Disassembler (top 55%) — fixed 60 lines, PC always centered ──
+        // ── Disassembler toolbar ──
         ui.horizontal(|ui| {
             ui.label("Disassembler");
             if self.disasm_search.is_empty() {
                 self.disasm_search = format!("{:04X}", self.disasm_addr);
             }
-            if ui.add(egui::TextEdit::singleline(&mut self.disasm_search).desired_width(60.0).font(egui::TextStyle::Monospace)).lost_focus() {
+            if ui.add(egui::TextEdit::singleline(&mut self.disasm_search).desired_width(55.0).font(egui::TextStyle::Monospace)).lost_focus() {
                 if let Ok(addr) = u16::from_str_radix(self.disasm_search.trim_start_matches("$").trim_start_matches("0x"), 16) {
                     self.disasm_addr = addr;
                 }
@@ -920,6 +961,8 @@ impl AftografApp {
                 self.disasm_addr = self.disasm_addr.saturating_add(0x10);
                 self.disasm_search = format!("{:04X}", self.disasm_addr);
             }
+            // PC address & follow checkbox
+            ui.monospace(format!("${:04X}", self.cpu.pc));
             if self.follow_pc {
                 ui.colored_label(egui::Color32::GREEN, "●");
             }
@@ -927,65 +970,84 @@ impl AftografApp {
         });
         let pc = self.cpu.pc;
 
-        const DISASM_LINES: usize = 60; // fits in available height, PC centered at line 30
+        // ── Disassembler — 500 instructions with scroll ──
+        const DISASM_LINES: usize = 500;
         let insns = self.disasm_insns(self.disasm_addr, DISASM_LINES);
 
         egui::ScrollArea::vertical()
-            .id_source(("disasm_scroll", self.disasm_addr, self.follow_pc))
-            .max_height(disasm_height)
+            .id_source("disasm_main_scroll")
+            .max_height(disasm_px)
             .show(ui, |ui| {
-                egui::Grid::new("disasm_grid")
-                    .striped(true)
-                    .min_col_width(20.0)
-                    .show(ui, |ui| {
-                        for insn in insns.iter() {
-                            let is_current = insn.addr == pc;
-                            let has_bp = self.breakpoints.contains(&insn.addr);
+                // Compact spacing for monospace columns
+                ui.style_mut().spacing.item_spacing.x = 3.0;
+                for insn in &insns {
+                    ui.horizontal(|ui| {
+                        let is_current = insn.addr == pc;
+                        let has_bp = self.breakpoints.contains(&insn.addr);
 
-                            let bp_str = if has_bp { "●" } else { " " };
-                            let bp_resp = ui.selectable_label(is_current, bp_str);
-                            if bp_resp.clicked() {
-                                if has_bp { self.breakpoints.remove(&insn.addr); }
-                                else { self.breakpoints.insert(insn.addr); }
-                            }
-                            if bp_resp.hovered() || bp_resp.is_pointer_button_down_on() {
-                                self.asm_hover_addr = Some(insn.addr);
-                            }
+                        // BP indicator — click to toggle
+                        let bp_str = if has_bp { "●" } else { " " };
+                        let bp_resp = ui.selectable_label(is_current, bp_str);
+                        if bp_resp.clicked() {
+                            if has_bp { self.breakpoints.remove(&insn.addr); }
+                            else { self.breakpoints.insert(insn.addr); }
+                        }
+                        if bp_resp.hovered() || bp_resp.is_pointer_button_down_on() {
+                            self.asm_hover_addr = Some(insn.addr);
+                        }
 
-                            let addr_str = format!("${:04X}", insn.addr);
-                            let bytes_str = Disassembler::format_bytes(&insn.bytes);
-                            let mnem = &insn.mnemonic;
-                            let oper = &insn.operands;
+                        let addr_str = format!("${:04X}", insn.addr);
+                        let bytes_str = Disassembler::format_bytes(&insn.bytes);
+                        let mnem = &insn.mnemonic;
+                        let oper = &insn.operands;
 
-                            if is_current {
-                                ui.colored_label(egui::Color32::from_rgb(125, 207, 255), addr_str);
-                                ui.colored_label(egui::Color32::from_rgb(125, 207, 255), &bytes_str);
-                                ui.colored_label(egui::Color32::from_rgb(125, 207, 255), mnem);
-                                ui.colored_label(egui::Color32::from_rgb(125, 207, 255), oper);
-                            } else {
-                                ui.monospace(addr_str);
-                                ui.monospace(bytes_str);
-                                ui.monospace(mnem);
-                                ui.monospace(oper);
-                            }
+                        if is_current {
+                            ui.colored_label(egui::Color32::from_rgb(125, 207, 255), addr_str);
+                            ui.colored_label(egui::Color32::from_rgb(125, 207, 255), &bytes_str);
+                            ui.colored_label(egui::Color32::from_rgb(125, 207, 255), mnem);
+                            ui.colored_label(egui::Color32::from_rgb(125, 207, 255), oper);
+                        } else {
+                            ui.monospace(addr_str);
+                            ui.monospace(bytes_str);
+                            ui.monospace(mnem);
+                            ui.monospace(oper);
+                        }
 
-                            if !insn.annotation.is_empty() {
-                                ui.colored_label(egui::Color32::GRAY, &insn.annotation);
-                            } else {
-                                ui.label("");
-                            }
-
-                            ui.end_row();
+                        if !insn.annotation.is_empty() {
+                            ui.colored_label(egui::Color32::GRAY, &insn.annotation);
                         }
                     });
+                }
             });
-        // ── Memory (virtual-scroll 64KB) ──
+        // ── Draggable splitter handle ──
+        let splitter_height = 5.0;
+        let (_splitter_rect, splitter_resp) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), splitter_height),
+            egui::Sense::drag()
+        );
+        let splitter_bg = if splitter_resp.hovered() || splitter_resp.dragged() {
+            egui::Color32::from_rgb(80, 100, 140)
+        } else {
+            egui::Color32::from_rgb(50, 55, 70)
+        };
+        ui.painter().rect_filled(_splitter_rect, 2.0, splitter_bg);
+        if splitter_resp.dragged() {
+            let delta = splitter_resp.drag_delta().y;
+            if delta != 0.0 {
+                self.disasm_split += delta / avail;
+                self.disasm_split = self.disasm_split.clamp(0.15, 0.85);
+            }
+        }
+        if splitter_resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+        // ── Memory toolbar ──
         ui.horizontal(|ui| {
             ui.label("Memory");
             if self.mem_search.is_empty() {
                 self.mem_search = format!("{:04X}", self.mem_scroll_addr);
             }
-            if ui.add(egui::TextEdit::singleline(&mut self.mem_search).desired_width(60.0).font(egui::TextStyle::Monospace)).lost_focus() {
+            if ui.add(egui::TextEdit::singleline(&mut self.mem_search).desired_width(55.0).font(egui::TextStyle::Monospace)).lost_focus() {
                 if let Ok(addr) = u16::from_str_radix(self.mem_search.trim_start_matches("$").trim_start_matches("0x"), 16) {
                     self.mem_scroll_addr = addr & 0xFFF0;
                     self.mem_scroll_target = Some(self.mem_scroll_addr / 16);
@@ -1017,109 +1079,55 @@ impl AftografApp {
         if !self.mem_warning.is_empty() {
             ui.colored_label(egui::Color32::RED, &self.mem_warning);
         }
-        // ── Virtual-scroll 64KB memory viewer ──
-        const ROW_H: f32 = 18.0;
-        const TOTAL_ROWS: usize = 4096; // 65536 / 16
-        let total_height = TOTAL_ROWS as f32 * ROW_H;
+        // ── Virtual-scroll 64KB memory viewer, compact single-string rows ──
+        const MEM_ROW_H: f32 = 14.0;
+        const MEM_TOTAL_ROWS: usize = 4096;
+        let mem_total_height = MEM_TOTAL_ROWS as f32 * MEM_ROW_H;
 
-        let mut scroll_area = egui::ScrollArea::vertical()
+        let mut mem_scroll = egui::ScrollArea::vertical()
             .id_source("mem_scroll_64kb");
-
-        // Only force scroll offset on explicit user action (Go/HL/nav)
         if let Some(target_row) = self.mem_scroll_target.take() {
-            scroll_area = scroll_area.vertical_scroll_offset(target_row as f32 * ROW_H);
+            mem_scroll = mem_scroll.vertical_scroll_offset(target_row as f32 * MEM_ROW_H);
         }
+        mem_scroll.show_viewport(ui, |ui, viewport| {
+            ui.set_min_height(mem_total_height);
+            let first_row = (viewport.min.y / MEM_ROW_H) as usize;
+            let last_row = ((viewport.max.y / MEM_ROW_H) as usize + 1).min(MEM_TOTAL_ROWS);
+            self.mem_scroll_addr = (first_row as u16) * 16;
+            let skip_y = first_row as f32 * MEM_ROW_H;
+            if skip_y > 0.0 { ui.add_space(skip_y); }
 
-        scroll_area.show_viewport(ui, |ui, viewport| {
-            ui.set_min_height(total_height);
-
-            // viewport is the visible rect in content coordinates
-            let first_visible = (viewport.min.y / ROW_H) as usize;
-            let last_visible = ((viewport.max.y / ROW_H) as usize + 1).min(TOTAL_ROWS);
-
-            // Update scroll addr from viewport position
-            self.mem_scroll_addr = (first_visible as u16) * 16;
-
-            // Skip to first visible row
-            let skip_y = first_visible as f32 * ROW_H;
-            if skip_y > 0.0 {
-                ui.add_space(skip_y);
-            }
-
-            // Render visible rows
-            for r in first_visible..last_visible {
+            let hl_addr = self.hl_addr;
+            for r in first_row..last_row {
                 let base = (r as u16) * 16;
-                let is_rom = base < 0x6000;
+                // Build single string for the whole row
+                let mut hex = String::with_capacity(52);
+                for c in 0..16u16 {
+                    if c == 8 { hex.push(' '); }
+                    let byte_addr = base.wrapping_add(c);
+                    let v = self.mmu.peek(byte_addr);
+                    hex.push_str(&format!("{v:02X}"));
+                }
+                let mut ascii = String::with_capacity(16);
+                for c in 0..16u16 {
+                    let v = self.mmu.peek(base.wrapping_add(c));
+                    ascii.push(if (32..=126).contains(&v) { v as char } else { '.' });
+                }
+
                 let is_ram = (0x6000..=0x67FF).contains(&base);
-                let addr_color = if is_rom { egui::Color32::from_rgb(101, 67, 33) }
-                    else if is_ram { egui::Color32::from_rgb(210, 180, 40) }
+                let has_hl = (0..16).any(|c| base.wrapping_add(c) == hl_addr);
+                let row_str = format!("${base:04X}  {hex}  |{ascii}|");
+
+                let label = egui::RichText::new(&row_str).monospace().size(12.0);
+                let color = if is_ram { egui::Color32::from_rgb(220, 200, 80) }
+                    else if base < 0x6000 { egui::Color32::from_rgb(139, 90, 43) }
                     else if (0xE000..0xE400).contains(&base) { egui::Color32::from_rgb(200, 100, 100) }
                     else if (0xE400..0xE800).contains(&base) { egui::Color32::from_rgb(100, 180, 200) }
                     else if (0xE800..0xEC00).contains(&base) { egui::Color32::from_rgb(180, 150, 80) }
                     else if (0xEC00..0xF000).contains(&base) { egui::Color32::from_rgb(150, 100, 200) }
                     else { egui::Color32::WHITE };
-                ui.horizontal(|ui| {
-                    ui.colored_label(addr_color, format!("${base:04X}"));
-                    for c in 0..16u16 {
-                        let byte_addr = base.wrapping_add(c);
-                        let v = self.mmu.peek(byte_addr);
-                        let is_hl = byte_addr == self.hl_addr;
-                        let byte_color = if is_hl { egui::Color32::from_rgb(255, 158, 100) }
-                            else if (0xE000..0xE400).contains(&byte_addr) { egui::Color32::from_rgb(200, 100, 100) }
-                            else if (0xE400..0xE800).contains(&byte_addr) { egui::Color32::from_rgb(100, 180, 200) }
-                            else if (0xE800..0xEC00).contains(&byte_addr) { egui::Color32::from_rgb(180, 150, 80) }
-                            else if (0xEC00..0xF000).contains(&byte_addr) { egui::Color32::from_rgb(150, 100, 200) }
-                            else if (0x6000..=0x67FF).contains(&byte_addr) { egui::Color32::from_rgb(220, 200, 80) }
-                            else if byte_addr < 0x6000 { egui::Color32::from_rgb(139, 90, 43) }
-                            else { egui::Color32::WHITE };
-                        let byte_str = format!("{v:02X}");
-                        let resp = ui.add(egui::Label::new(
-                            egui::RichText::new(&byte_str).color(byte_color).monospace()
-                        ).sense(egui::Sense::click()));
-                        if resp.double_clicked() {
-                            self.mem_edit_addr = Some(byte_addr);
-                            self.mem_edit_buf = byte_str.clone();
-                        }
-                        if self.mem_edit_addr == Some(byte_addr) {
-                            let ted = ui.add(egui::TextEdit::singleline(&mut self.mem_edit_buf)
-                                .desired_width(18.0)
-                                .font(egui::TextStyle::Monospace)
-                                .char_limit(2));
-                            if ted.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                if (0x6000..=0x67FF).contains(&byte_addr) || (0xE000..=0xEFFF).contains(&byte_addr) {
-                                    if let Ok(v) = u8::from_str_radix(self.mem_edit_buf.trim(), 16) {
-                                        self.mmu.poke(byte_addr, v);
-                                        self.mem_warning = String::new();
-                                    }
-                                } else {
-                                    let region = if byte_addr < 0x6000 { "ROM" } else { "свободная" };
-                                    self.mem_warning = format!("⚠ Ошибка: {region} ${byte_addr:04X} — запись невозможна");
-                                    self.mem_invalid_write = Some(byte_addr);
-                                }
-                                self.mem_edit_addr = None;
-                            }
-                        }
-                    }
-                    // ASCII
-                    ui.label(" |");
-                    for c in 0..16u16 {
-                        let byte_addr = base.wrapping_add(c);
-                        let v = self.mmu.peek(byte_addr);
-                        let ch = if (32..=126).contains(&v) { v as char } else { '.' };
-                        let is_hl = byte_addr == self.hl_addr;
-                        let is_edit = self.mem_edit_addr == Some(byte_addr);
-                        let ascii_color = if is_edit { egui::Color32::YELLOW }
-                            else if is_hl { egui::Color32::from_rgb(255, 158, 100) }
-                            else { egui::Color32::WHITE };
-                        let resp = ui.add(egui::Label::new(
-                            egui::RichText::new(ch.to_string()).color(ascii_color).monospace()
-                        ).sense(egui::Sense::click()));
-                        if resp.double_clicked() {
-                            self.mem_edit_addr = Some(byte_addr);
-                            self.mem_edit_buf = format!("{v:02X}");
-                        }
-                    }
-                });
+                let label = if has_hl { label.background_color(egui::Color32::from_rgb(60, 50, 30)) } else { label };
+                ui.add(egui::Label::new(label.color(color)).sense(egui::Sense::click()));
             }
         });
     }
@@ -1401,40 +1409,67 @@ impl AftografApp {
             .id(egui::Id::new("help"))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .resizable(true)
-            .default_size([350.0, 400.0])
+            .default_size([380.0, 480.0])
             .open(&mut self.show_help)
             .show(ctx, |ui| {
-                ui.heading("Подсказка");
-                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.heading("Подсказка");
+                    ui.separator();
 
-                ui.label("Клавиатурные сокращения:");
-                ui.label("Space/→ — Step");
-                ui.label("R — Reset CPU");
-                ui.label("F5 — Run/Pause");
-                ui.label("B — Breakpoint на PC");
-                ui.label("J — Jump PC к адресу под курсором");
-                ui.label("? / / — Эта подсказка");
-                ui.label("Esc — Закрыть");
+                    ui.label("Клавиатурные сокращения:");
+                    ui.label("Space/→ — Step (шаг)");
+                    ui.label("R — Reset CPU (сброс)");
+                    ui.label("F5 — Run/Pause (пуск/пауза)");
+                    ui.label("B — Breakpoint на PC (точка останова)");
+                    ui.label("J — Jump PC к адресу под курсором");
+                    ui.label("? / / — Эта подсказка");
+                    ui.label("F1 — Открыть/закрыть справку");
+                    ui.label("Esc — Закрыть окно");
 
-                ui.separator();
-                ui.label("Мышь:");
-                ui.label("Клик по флагу — переключить");
-                ui.label("Клик по строке дизассемблера — BP");
-                ui.label("Клик по байту памяти — редактировать");
+                    ui.separator();
+                    ui.label("Мышь:");
+                    ui.label("Клик по флагу — переключить");
+                    ui.label("Клик по строке дизассемблера — BP");
+                    ui.label("Двойной клик по строке дизассемблера — Jump PC");
+                    ui.label("Клик по адресу BC/DE/HL/SP — переход в памяти");
+                    ui.label("Двойной клик по байту памяти — редактировать");
 
-                ui.separator();
-                ui.label("Цветовая легенда памяти:");
-                ui.colored_label(egui::Color32::from_rgb(139, 90, 43), "██ ПЗУ (ROM) $0000-$5FFF");
-                ui.colored_label(egui::Color32::from_rgb(220, 200, 80), "██ ОЗУ (RAM) $6000-$67FF");
-                ui.colored_label(egui::Color32::from_rgb(200, 100, 100), "██ PPI1 $E000-$E3FF");
-                ui.colored_label(egui::Color32::from_rgb(100, 180, 200), "██ PPI2 $E400-$E7FF");
-                ui.colored_label(egui::Color32::from_rgb(180, 150, 80), "██ PIT $E800-$EBFF");
-                ui.colored_label(egui::Color32::from_rgb(150, 100, 200), "██ USART $EC00-$EFFF");
-                ui.colored_label(egui::Color32::WHITE, "██ Не используется (unmapped)");
-                ui.colored_label(egui::Color32::RED, "██ Ошибка записи");
+                    ui.separator();
+                    ui.label("Цветовая легенда памяти:");
+                    ui.colored_label(egui::Color32::from_rgb(139, 90, 43), "██ ПЗУ (ROM) $0000-$5FFF");
+                    ui.colored_label(egui::Color32::from_rgb(220, 200, 80), "██ ОЗУ (RAM) $6000-$67FF");
+                    ui.colored_label(egui::Color32::from_rgb(200, 100, 100), "██ PPI1 $E000-$E3FF");
+                    ui.colored_label(egui::Color32::from_rgb(100, 180, 200), "██ PPI2 $E400-$E7FF");
+                    ui.colored_label(egui::Color32::from_rgb(180, 150, 80), "██ PIT $E800-$EBFF");
+                    ui.colored_label(egui::Color32::from_rgb(150, 100, 200), "██ USART $EC00-$EFFF");
+                    ui.colored_label(egui::Color32::WHITE, "██ Не используется (unmapped)");
+                    ui.colored_label(egui::Color32::RED, "██ Ошибка записи");
 
-                ui.separator();
-                ui.label("Советы:");
+                    ui.separator();
+                    ui.label("Карта памяти i8080 (64KB):");
+                    ui.label("$0000-$5FFF — ПЗУ (24KB, 3 чипа × 8KB)");
+                    ui.label("$6000-$67FF — ОЗУ (2KB, 6116 SRAM)");
+                    ui.label("$E000-$E3FF — PPI1 (КР580ВВ55А)");
+                    ui.label("$E400-$E7FF — PPI2 (КР580ВВ55А)");
+                    ui.label("$E800-$EBFF — PIT (КР580ВИ53)");
+                    ui.label("$EC00-$EFFF — USART (КР580ВВ51А)");
+                    ui.label("$F000-$FFFF — Зарезервировано");
+
+                    ui.separator();
+                    ui.label("Плоттер (A4):");
+                    ui.label("Симуляция графопостроителя с перьевым блоком.");
+                    ui.label("Управляется через PPI и RAM-переменные:");
+                    ui.label("X: [$6180:$6181] Y: [$6186:$6187]");
+                    ui.label("Перо: [$63F0] Цвет: [$61E8]");
+                    ui.label("HPGL-файлы: прямая загрузка или через USART.");
+
+                    ui.separator();
+                    ui.label("Советы:");
+                    ui.label("• HLT — CPU остановлен. Нажми R для Reset");
+                    ui.label("• ⚙ Настройки — тема, адреса, DIP, watcher'ы");
+                    ui.label("• ⏱ Speed slider: от ∞ до 1 MHz");
+                    ui.label("• Клик BC/DE/HL/SP — переход к адресу в памяти");
+                });
             });
     }
 
