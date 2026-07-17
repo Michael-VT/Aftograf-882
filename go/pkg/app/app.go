@@ -31,7 +31,7 @@ import (
 	"github.com/Michael-VT/Aftograf-882/pkg/usart8251"
 )
 
-const appVersion = "v1.0.15"
+const appVersion = "v1.0.18"
 
 // ───── Compact layout (zero-spacing vertical) ─────
 type compactVBox struct{}
@@ -143,6 +143,8 @@ type AftografApp struct {
 	followPC    bool
 	disasmSrch  string
 	breakpoints map[uint16]bool
+	insnIndex  []uint16 // instruction start addresses (linear sweep)
+	pcInsnIdx  int      // index into insnIndex for current PC (or -1)
 	disasmList  *widget.List
 	dsEntry     *widget.Entry
 
@@ -216,12 +218,19 @@ func (a *AftografApp) Run() {
 			// Update key labels from goroutine (Refresh/SetText are goroutine-safe in Fyne)
 			s := "RUN"; if a.CPU.Halt { s = "HLT" }
 			a.statusL.SetText(s)
+			a.regDisp[0].SetText(fmt.Sprintf("A:%02X", a.CPU.A))
+			if a.regEdit[0] != nil { a.regEdit[0].SetText(fmt.Sprintf("%02X", a.CPU.A)) }
 			a.regDisp[5].SetText(fmt.Sprintf("PC:%04X", a.CPU.PC))
 			a.regDisp[7].SetText(fmt.Sprintf("Cycles: %d", a.CPU.Cycles))
 			a.regBCb.SetText(fmt.Sprintf("BC:%04X", a.CPU.GetBC()))
+			if a.regEdit[1] != nil { a.regEdit[1].SetText(fmt.Sprintf("%02X", a.CPU.B)) }
+			if a.regEdit[2] != nil { a.regEdit[2].SetText(fmt.Sprintf("%02X", a.CPU.C)) }
 			a.regDEb.SetText(fmt.Sprintf("DE:%04X", a.CPU.GetDE()))
+			if a.regEdit[3] != nil { a.regEdit[3].SetText(fmt.Sprintf("%02X", a.CPU.D)) }
+			if a.regEdit[4] != nil { a.regEdit[4].SetText(fmt.Sprintf("%02X", a.CPU.E)) }
 			a.regHLb.SetText(fmt.Sprintf("HL:%04X", a.CPU.GetHL()))
 			a.regSPb.SetText(fmt.Sprintf("SP:%04X", a.CPU.SP))
+			if a.regEdit[5] != nil { a.regEdit[5].SetText(fmt.Sprintf("%04X", a.CPU.SP)) }
 			if a.regH != nil { a.regH.SetText(fmt.Sprintf("%02X", a.CPU.H)) }
 			if a.regL != nil { a.regL.SetText(fmt.Sprintf("%02X", a.CPU.L)) }
 			if a.followPC { a.disasmAddr = a.CPU.PC }
@@ -244,12 +253,18 @@ func (a *AftografApp) Reset() {
 
 func (a *AftografApp) syncUI() {
 	if a.regDisp[0] == nil { return }
-	// Labels update live; entries keep last-submitted value
+	// Labels & entries update live
 	a.regDisp[0].SetText(fmt.Sprintf("A:%02X", a.CPU.A))
+	if a.regEdit[0] != nil { a.regEdit[0].SetText(fmt.Sprintf("%02X", a.CPU.A)) }
 	a.regBCb.SetText(fmt.Sprintf("BC:%04X", a.CPU.GetBC()))
+	if a.regEdit[1] != nil { a.regEdit[1].SetText(fmt.Sprintf("%02X", a.CPU.B)) }
+	if a.regEdit[2] != nil { a.regEdit[2].SetText(fmt.Sprintf("%02X", a.CPU.C)) }
 	a.regDEb.SetText(fmt.Sprintf("DE:%04X", a.CPU.GetDE()))
+	if a.regEdit[3] != nil { a.regEdit[3].SetText(fmt.Sprintf("%02X", a.CPU.D)) }
+	if a.regEdit[4] != nil { a.regEdit[4].SetText(fmt.Sprintf("%02X", a.CPU.E)) }
 	a.regHLb.SetText(fmt.Sprintf("HL:%04X", a.CPU.GetHL()))
 	a.regSPb.SetText(fmt.Sprintf("SP:%04X", a.CPU.SP))
+	if a.regEdit[5] != nil { a.regEdit[5].SetText(fmt.Sprintf("%04X", a.CPU.SP)) }
 	a.regDisp[5].SetText(fmt.Sprintf("PC:%04X", a.CPU.PC))
 	fl := a.CPU.Flags
 	bits := []struct{b uint8; n string}{{cpu.FlagS,"S"},{cpu.FlagZ,"Z"},{cpu.FlagAC,"AC"},{cpu.FlagP,"P"},{cpu.FlagCY,"CY"}}
@@ -282,7 +297,11 @@ func (a *AftografApp) syncUI() {
 func (a *AftografApp) memJump(ad uint16) {
 	a.memAddr = ad & 0xFFF0; a.memSrch = fmt.Sprintf("%04X", a.memAddr)
 	if a.memEntry != nil { a.memEntry.SetText(a.memSrch) }
-	if a.memList != nil { a.memList.ScrollTo(widget.ListItemID(a.memAddr / 16)) }
+	if a.memList != nil {
+		id := int(a.memAddr / 16)
+		// Scroll so target address appears near TOP of viewport
+		a.memList.ScrollTo(widget.ListItemID(id))
+	}
 }
 type sessionData struct {
 	CPU     cpuState `json:"cpu"`
@@ -362,13 +381,19 @@ func (a *AftografApp) loadSession() {
 }
 func (a *AftografApp) refreshDisasm() {
 	if a.disasmList == nil { return }
-	// 1. Scroll to correct position FIRST
-	target := a.disasmAddr / 2
-	if a.followPC { target = a.CPU.PC / 2 }
-	// Center in the visible area (estimate ~16 items visible)
-	if target > 8 { target -= 8 } else { target = 0 }
+	// Rebuild instruction index from memory (linear sweep).
+	// This ensures every row shows a complete instruction — no misaligned decodes.
+	readByte := func(aa uint16) uint8 { return a.MMU.Read(aa) }
+	a.insnIndex = disasm.BuildInsnIndex(readByte)
+	// Find the instruction index containing PC for highlighting
+	a.pcInsnIdx = disasm.InsnIndexForAddr(a.insnIndex, a.CPU.PC)
+	// Determine which instruction to scroll to
+	target := a.pcInsnIdx
+	if !a.followPC {
+		target = disasm.InsnIndexForAddr(a.insnIndex, a.disasmAddr)
+	}
+	if target < 0 { target = 0 }
 	a.disasmList.ScrollTo(widget.ListItemID(target))
-	// 2. THEN refresh so visible items get UpdateItem at the new position
 	a.disasmList.Refresh()
 }
 func (a *AftografApp) refreshMem() {
@@ -680,41 +705,42 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 			a.mainWin.Clipboard().SetContent(sb.String())
 		}),
 	)
-	// Disassembler — virtual-scroll list through all 64KB
-	textItem := func() fyne.CanvasObject {
-		t := canvas.NewText("", color.RGBA{200, 200, 200, 255})
-		t.TextStyle = fyne.TextStyle{Monospace: true}
-		return t
-	}
-	a.disasmList = widget.NewList(
-		func() int { return 32768 },
-		textItem,
-		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			addr := uint16(id) * 2
-			if uint32(addr) >= 0x10000 { return }
-			insns := disasm.Disassemble(addr, func(aa uint16) uint8 { return a.MMU.Read(aa) })
-			if len(insns) == 0 { return }
-			ins := insns[0]
-			pc := a.CPU.PC
-			// Check if PC falls within this instruction's address range
-			insEnd := ins.Address + uint16(ins.Length)
-			isPC := pc >= ins.Address && pc < insEnd
-			_, hasBP := a.breakpoints[ins.Address]
-			marker := " "; if isPC { marker = "→" }
-			var hx string; for _, b := range ins.Bytes { hx += fmt.Sprintf("%02X ", b) }
-			bpStr := "  "; if hasBP { bpStr = "●" }
-			t := obj.(*canvas.Text)
-			t.Text = fmt.Sprintf("%s%s%04X  %-8s %s", bpStr, marker, ins.Address, hx, ins.Mnemonic)
-			if isPC {
-				t.Color = color.RGBA{125, 207, 255, 255} // cyan for current
-			} else {
-				t.Color = color.RGBA{200, 200, 200, 255}
-			}
-			t.Refresh()
-		},
-	)
+	// Build initial instruction index so the list starts with correct count
+	a.insnIndex = disasm.BuildInsnIndex(func(aa uint16) uint8 { return a.MMU.Read(aa) })
+	a.pcInsnIdx = disasm.InsnIndexForAddr(a.insnIndex, a.CPU.PC)
+textItem := func() fyne.CanvasObject {
+	t := canvas.NewText("", color.RGBA{200, 200, 200, 255})
+	t.TextStyle = fyne.TextStyle{Monospace: true}
+	return t
+}
+a.disasmList = widget.NewList(
+	func() int { return len(a.insnIndex) },
+	textItem,
+	func(id widget.ListItemID, obj fyne.CanvasObject) {
+		if int(id) >= len(a.insnIndex) { return }
+		addr := a.insnIndex[id]
+		insns := disasm.Disassemble(addr, func(aa uint16) uint8 { return a.MMU.Read(aa) })
+		if len(insns) == 0 || insns[0].Length == 0 { return }
+		ins := &insns[0]
+		// Highlight if this is the instruction containing PC
+		isPC := int(id) == a.pcInsnIdx
+		_, hasBP := a.breakpoints[ins.Address]
+		marker := " "; if isPC { marker = "→" }
+		var hx string; for _, b := range ins.Bytes { hx += fmt.Sprintf("%02X ", b) }
+		bpStr := "  "; if hasBP { bpStr = "●" }
+		t := obj.(*canvas.Text)
+		t.Text = fmt.Sprintf("%s%s%04X  %-8s %s", bpStr, marker, ins.Address, hx, ins.Mnemonic)
+		if isPC {
+			t.Color = color.RGBA{125, 207, 255, 255}
+		} else {
+			t.Color = color.RGBA{200, 200, 200, 255}
+		}
+		t.Refresh()
+	},
+)
 	a.disasmList.OnSelected = func(id widget.ListItemID) {
-		addr := uint16(id) * 2
+		if int(id) >= len(a.insnIndex) { return }
+		addr := a.insnIndex[id]
 		a.disasmAddr = addr; a.followPC = false
 		a.disasmSrch = fmt.Sprintf("%04X", addr)
 		a.memJump(addr)

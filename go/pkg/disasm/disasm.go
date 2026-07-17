@@ -328,3 +328,41 @@ func Disassemble(addr uint16, readByte func(uint16) uint8) [3]DisasmInsn {
 	}
 	return result
 }
+
+// BuildInsnIndex performs a linear sweep from address 0 through 0xFFFF,
+// decoding each instruction sequentially. Returns a sorted slice of every
+// instruction's start address. The caller provides readByte to read memory.
+func BuildInsnIndex(readByte func(uint16) uint8) []uint16 {
+	addrs := make([]uint16, 0, 32768)
+	addr := uint16(0)
+	for {
+		addrs = append(addrs, addr)
+		op := readByte(addr)
+		size := opTable[op].size // 1, 2, or 3
+		next := uint32(addr) + uint32(size)
+		if next >= 0x10000 {
+			break
+		}
+		addr = uint16(next)
+	}
+	return addrs
+}
+
+// InsnIndexForAddr returns the index into the instruction index for the
+// instruction whose address range contains addr. Returns len(index)-1 for
+// addresses past the last instruction.
+func InsnIndexForAddr(index []uint16, addr uint16) int {
+	if len(index) == 0 {
+		return -1
+	}
+	lo, hi := 0, len(index)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if index[mid] <= addr {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo - 1
+}

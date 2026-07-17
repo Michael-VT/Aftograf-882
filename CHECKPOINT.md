@@ -1,14 +1,14 @@
 # Autograf-882 — Checkpoint
 
-**Date:** 2026-07-16  
-**State:** STABLE — Go v1.0.15, Rust v1.0.11
+**Date:** 2026-07-17  
+**State:** STABLE — Go v1.0.18, Rust v1.0.11
 
 ## Versions
 
 | Implementation | Version | Status |
 |---------------|---------|--------|
 | Rust (`rust/`) | v1.0.11 | STABLE — all bugs fixed, 37/37 tests |
-| Go (`go/`) | v1.0.15 | STABLE — vet-clean, all tests pass |
+| Go (`go/`) | v1.0.18 | STABLE — vet-clean, all tests pass (35 CPU + 28 MMU + 3 disasm) |
 
 ## Project Structure
 
@@ -50,10 +50,9 @@
 ├── sim/                           ← Browser debug simulator (legacy)
 ├── docs/                          ← Documentation & datasheets
 ├── *.hpgl                         ← Sample HPGL plot files
-├── README.*.md                    ← Project docs (6 languages)
+├── RULES.md                      ← Architecture rules (must follow)
 ├── SUMMARY.md                     ← Project summary
 └── CHECKPOINT.md                  ← This file
-```
 
 ## Go Implementation Status
 
@@ -77,6 +76,17 @@
 - Memory colors → ROM/RAM/I/O color-coded byte buttons
 - USART → Send button parses hex and calls `ReceiveData()`
 
+### Recent Fixes (v1.0.18) — Instruction-indexed disassembly + UI fixes
+- **Disassembly: linear sweep** — replaced fixed-size rows (2-byte then 1-byte) with
+  `disasm.BuildInsnIndex()` — all instructions shown as complete rows regardless of length.
+  No more misaligned decodes or garbage instructions in the listing.
+- **Highlight: exact instruction match** — `isPC = (id == pcInsnIdx)`. Only ONE row
+  highlighted at a time, no over-highlighting across multiple rows.
+- **Memory viewer scroll** — `ScrollTo(id)` without offset, target centered in viewport.
+- **Register entry fields** — A/B/C/D/E/SP hex entries now update in `syncUI()`, matching
+  pair buttons (BC:XXXX, DE:XXXX) exactly.
+- `trygo.sh` forces fresh test runs with `go test -count=1` + clear PASS/FAIL summary.
+- Created `sim/tryjs.sh` for browser version.
 ### Known Issues
 1. I/O device stubs simplified (no real PIT counting, PPI modes)
 2. USART interrupt is single RST 7 — no multi-vector

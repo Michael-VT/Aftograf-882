@@ -1,11 +1,36 @@
-# Session Handoff — 2026-07-16
+# Session Handoff — 2026-07-17
 
 ## Last Session Summary
 
-Synchronized the Go implementation with Rust features. All 15 planned tasks completed.
+Critical CPU instruction bugs fixed in Go implementation. Comprehensive test suite added.
 
-## Go App State
+## Go CPU Bug Fixes (v1.0.18)
 
+### 🔴 Fix: Missing MOV A,r (0x78–0x7f)
+8 instructions were completely absent from `Step()`: MOV A,B/C/D/E/H/L/M/A.
+Accumulator could never be loaded from any register or memory.
+
+### 🔴 Fix: 0xCB treated as JMP instead of NOP
+On real i8080A, 0xCB is an undocumented NOP (1 byte, 4 cycles). The emulator
+treated it as JMP addr (3 bytes, 10 cycles), consuming the next 2 bytes as a
+jump target. This was the root cause of "перескочило на 500 байт":
+firmware byte 0xCB followed by 0xF4 0x01 → jump to 0x01F4 = 500.
+
+## New CPU Tests
+
+35 comprehensive tests added in `go/pkg/cpu/cpu_test.go`:
+- Register-to-register MOV (all combos)
+- Memory MOV (r,M and M,r)
+- All arithmetic with full flag verification (S,Z,AC,P,CY)
+- All logical operations
+- Rotates, DAA, stack ops, conditional jumps/calls/returns
+- RST 0-7, IN/OUT, interrupt, reset
+- Run: `cd go && go test -count=1 ./pkg/cpu/... -v`
+
+## Run Scripts
+- Go: `go/trygo.sh` — builds, tests (no cache), launches GUI
+- Rust: `rust/tryrust.sh` — builds, tests, launches GUI  
+- JS: `sim/tryjs.sh` — bundles, opens HTTP server
 **File:** `go/pkg/app/app.go` — 717 lines
 
 ### Architecture (3-panel split)
@@ -73,11 +98,11 @@ a.regEdit[1].OnSubmitted = func(s string) {
 ### Build/Run
 ```bash
 cd go && go run ./cmd/aftograf
-cd go && go test ./...
+cd go && go test -count=1 ./...
 ```
 
 ### Testing
-- `go test ./...` passes (2 test packages: memory, disasm)
+- `go test -count=1 ./...` passes (3 test packages: cpu 35, memory 28, disasm 3)
 - `go vet ./...` passes
 
 ## Pending Items

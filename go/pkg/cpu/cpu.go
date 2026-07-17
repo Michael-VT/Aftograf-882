@@ -622,6 +622,22 @@ func (c *CPU8080) Step() bool {
 		c.Cycles += 7
 	case 0x77: // MOV M, A
 		c.WriteByte(c.getHL(), c.A); c.Cycles += 7
+	case 0x78: // MOV A, B
+		c.A = c.B; c.Cycles += 5
+	case 0x79: // MOV A, C
+		c.A = c.C; c.Cycles += 5
+	case 0x7a: // MOV A, D
+		c.A = c.D; c.Cycles += 5
+	case 0x7b: // MOV A, E
+		c.A = c.E; c.Cycles += 5
+	case 0x7c: // MOV A, H
+		c.A = c.H; c.Cycles += 5
+	case 0x7d: // MOV A, L
+		c.A = c.L; c.Cycles += 5
+	case 0x7e: // MOV A, M
+		c.A = c.ReadByte(c.getHL()); c.Cycles += 7
+	case 0x7f: // MOV A, A
+		c.Cycles += 5
 
 	// ADD r (0x80-0x87)
 	case 0x80:
@@ -845,9 +861,8 @@ func (c *CPU8080) Step() bool {
 		c.PC = c.popStack()
 		c.Cycles += 10
 
-	case 0xcb: // JMP (same as 0xc3 on some assemblers)
-		c.PC = c.fetchWord()
-		c.Cycles += 10
+	case 0xcb: // NOP (undocumented on 8080, treated as NOP)
+		c.Cycles += 4
 
 	case 0xcd: // CALL addr
 		addr := c.fetchWord()

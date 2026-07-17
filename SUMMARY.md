@@ -1,7 +1,7 @@
 # Aftograf-882 — Project Summary
 
-**Version:** v1.0.15 (Go) / v1.0.11 (Rust)  
-**Go:** `go build` ✅ | `go vet` ✅ | `go test` 2 packages ✅  
+**Version:** v1.0.18 (Go) / v1.0.11 (Rust)
+**Go:** `go build` ✅ | `go vet` ✅ | `go test -count=1` 3 packages ✅ (35 CPU tests)  
 **Rust:** `cargo build` ✅ | `cargo clippy -- -D warnings` ✅ | `cargo test` 37/37 ✅  
 **Last commit:** WIP — 2026-07-16  
 **Remote:** https://github.com/Michael-VT/Aftograf-882
@@ -21,7 +21,7 @@
 - 6-language READMEs
 
 ### Go (go/) — Near-feature-complete, actively developed
-- Full Intel 8080 / K580IK80A — all 256 opcodes, 0 additional tests
+- Full Intel 8080 / K580IK80A — all 256 opcodes, 35 unit tests
 - MMU: ROM 24KB + RAM 2KB + memory-mapped I/O (all 4 devices), 28 tests
 - I/O: PPI-8255 (2 chips), PIT-8253 (3 counters), USART-8251 (UART)
 - Disassembler with breakpoints, follow-PC, address search, copy-to-clipboard

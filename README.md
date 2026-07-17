@@ -1,4 +1,4 @@
-# Autograf-882 Debug Simulator v1.0.15
+# Autograf-882 Debug Simulator v1.0.18
 
 ![Autograf-882 — Original Device](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
 *The original Autograf-882 flatbed plotter*
@@ -88,7 +88,6 @@ cargo run --release
 ```
 
 Tests:
-
 ```bash
 cd rust
 cargo test -- --test-threads=1
@@ -107,7 +106,7 @@ Tests:
 
 ```bash
 cd go
-go test ./...
+go test -count=1 ./...
 ```
 
 ### Browser Version (`sim/`)
@@ -115,10 +114,11 @@ go test ./...
 The legacy browser-based version:
 
 ```bash
+cd sim && ./tryjs.sh
+# Or manually:
 python3 -m http.server 8080
 # Open http://localhost:8080/sim/
 ```
-
 ![Autograf-882 Debug Simulator (JS)](images/Aftograf-882-Debuger.png)
 *Browser-based debugger simulator (JavaScript)*
 

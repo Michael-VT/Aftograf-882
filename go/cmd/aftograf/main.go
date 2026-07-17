@@ -10,7 +10,7 @@ import (
 func main() {
 	sim := aftograf.New()
 	a := app.New()
-	w := a.NewWindow("Aftograf-882 Debuger v1.0.15")
+	w := a.NewWindow("Aftograf-882 Debuger v1.0.18")
 	w.Resize(fyne.NewSize(1400, 900))
 	w.SetContent(sim.MakeWindow(w))
 	w.ShowAndRun()
