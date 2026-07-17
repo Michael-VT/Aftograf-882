@@ -303,12 +303,12 @@ func (a *AftografApp) memJump(ad uint16) {
 	if a.memEntry != nil { a.memEntry.SetText(a.memSrch) }
 	if a.memList != nil {
 		id := int(a.memAddr / 16)
-		// Scroll to id + viewportHalf (≈22 items) so Fyne places target_id
-		// at the TOP of the viewport: ScrollTo aligns a below-viewport item's
-		// BOTTOM with the viewport bottom, so scrolling to id+N shows
-		// items id..id+N with id at the top.
-		const viewHalf = 22
-		scrollTo := id + viewHalf
+		// Two-phase scroll: first reset to top, then scroll past target.
+		// Fyne ScrollTo aligns a below-viewport item's bottom to the viewport
+		// bottom; scrolling to id+viewportRows places id at the top.
+		a.memList.ScrollTo(0)
+		a.memList.Refresh()
+		scrollTo := id + 15 // ≈ visible rows in memory viewport
 		if scrollTo > 4095 { scrollTo = 4095 }
 		a.memList.ScrollTo(widget.ListItemID(scrollTo))
 	}
