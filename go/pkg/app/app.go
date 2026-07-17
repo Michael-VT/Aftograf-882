@@ -303,9 +303,14 @@ func (a *AftografApp) memJump(ad uint16) {
 	if a.memEntry != nil { a.memEntry.SetText(a.memSrch) }
 	if a.memList != nil {
 		id := int(a.memAddr / 16)
-		// Scroll to beginning first so the target appears at TOP of viewport
-		a.memList.ScrollTo(0)
-		a.memList.ScrollTo(widget.ListItemID(id))
+		// Scroll to id + viewportHalf (≈22 items) so Fyne places target_id
+		// at the TOP of the viewport: ScrollTo aligns a below-viewport item's
+		// BOTTOM with the viewport bottom, so scrolling to id+N shows
+		// items id..id+N with id at the top.
+		const viewHalf = 22
+		scrollTo := id + viewHalf
+		if scrollTo > 4095 { scrollTo = 4095 }
+		a.memList.ScrollTo(widget.ListItemID(scrollTo))
 	}
 }
 type sessionData struct {
@@ -813,9 +818,12 @@ a.disasmList = widget.NewList(
 	a.disasmList.OnSelected = func(id widget.ListItemID) {
 		if int(id) >= len(a.insnIndex) { return }
 		addr := a.insnIndex[id]
+		a.breakpoints[addr] = !a.breakpoints[addr]
+		a.refreshBreakpoints()
 		a.disasmAddr = addr; a.followPC = false
 		a.disasmSrch = fmt.Sprintf("%04X", addr)
 		a.memJump(addr)
+		a.refreshDisasm()
 	}
 	dsCard := widget.NewCard("Disassembler", "", container.NewBorder(dsNav, nil, nil, nil, a.disasmList))
 
