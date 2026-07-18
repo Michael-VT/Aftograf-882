@@ -222,3 +222,27 @@ func (p *PIT8253) latchStatus(idx int) {
 	c.latchStatus = &statusLatch{nullCount: null}
 	_ = st // status byte available for read-back if needed
 }
+
+// CounterVal returns the current 16-bit count value of counter idx (0-2).
+func (p *PIT8253) CounterVal(idx int) uint16 {
+	if idx < 0 || idx > 2 { return 0 }
+	return p.counters[idx].count
+}
+
+// CounterMode returns the operating mode of counter idx (0-2).
+func (p *PIT8253) CounterMode(idx int) CounterMode {
+	if idx < 0 || idx > 2 { return 0 }
+	return p.counters[idx].mode
+}
+
+// CounterReload returns the reload value of counter idx (0-2).
+func (p *PIT8253) CounterReload(idx int) uint16 {
+	if idx < 0 || idx > 2 { return 0 }
+	return p.counters[idx].reload
+}
+
+// CounterAccess returns the access format of counter idx (0-2).
+func (p *PIT8253) CounterAccess(idx int) AccessFormat {
+	if idx < 0 || idx > 2 { return 0 }
+	return p.counters[idx].access
+}

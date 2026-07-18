@@ -149,6 +149,7 @@ type AftografApp struct {
 	bpPrev, bpNext *widget.Button // navigation
 	insnIndex  []uint16 // instruction start addresses (linear sweep)
 	pcInsnIdx  int      // index into insnIndex for current PC (or -1)
+	pioLbl   *fyne.Container // peripheral I/O status VBox
 	disasmList  *widget.List
 	dsEntry     *widget.Entry
 
@@ -238,7 +239,7 @@ func (a *AftografApp) Run() {
 			if a.regH != nil { a.regH.SetText(fmt.Sprintf("%02X", a.CPU.H)) }
 			if a.regL != nil { a.regL.SetText(fmt.Sprintf("%02X", a.CPU.L)) }
 			if a.followPC { a.disasmAddr = a.CPU.PC }
-			a.refreshDisasm(); a.refreshMem(); a.refreshStack(); a.refreshBreakpoints()
+			a.refreshDisasm(); a.refreshMem(); a.refreshStack(); a.refreshBreakpoints(); a.refreshPIO()
 			time.Sleep(16 * time.Millisecond)
 		}
 		a.syncUI()
@@ -295,7 +296,7 @@ func (a *AftografApp) syncUI() {
 	if a.progBar != nil && a.HPGL != nil && len(a.HPGL.Segments) > 0 {
 		a.progBar.SetValue(float64(a.hpglStep) / float64(len(a.HPGL.Segments)))
 	}
-	a.refreshDisasm(); a.refreshMem(); a.refreshStack(); a.refreshBreakpoints()
+	a.refreshDisasm(); a.refreshMem(); a.refreshStack(); a.refreshBreakpoints(); a.refreshPIO()
 }
 
 func (a *AftografApp) memJump(ad uint16) {
@@ -457,6 +458,65 @@ func (a *AftografApp) refreshBreakpoints() {
 	}
 
 }
+func (a *AftografApp) refreshPIO() {
+	if a.pioLbl == nil { return }
+	a.pioLbl.RemoveAll()
+	bin := func(v uint8) string {
+		s := ""
+		for i := 7; i >= 0; i-- {
+			if v&(1<<uint(i)) != 0 { s += "1" } else { s += "0" }
+		}
+		return s
+	}
+	// ── PPI1 (0xE000) ──
+	a.pioLbl.Add(monoLabel("── PPI1 (E000) ──"))
+	p1 := a.PPI1
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  A: %s  (%02X)", bin(p1.PortA()), p1.PortA())))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  B: %s  (%02X)", bin(p1.PortB()), p1.PortB())))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  C: %s  (%02X)", bin(p1.PortC()), p1.PortC())))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  CTL: %s  (%02X)  Mode A:%d B:%d",
+		bin(p1.Control()), p1.Control(), p1.ModeA(), p1.ModeB())))
+	// ── PPI2 (0xE400) ──
+	a.pioLbl.Add(monoLabel("── PPI2 (E400) ──"))
+	p2 := a.PPI2
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  A: %s  (%02X)", bin(p2.PortA()), p2.PortA())))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  B: %s  (%02X)", bin(p2.PortB()), p2.PortB())))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  C: %s  (%02X)", bin(p2.PortC()), p2.PortC())))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  CTL: %s  (%02X)  Mode A:%d B:%d",
+		bin(p2.Control()), p2.Control(), p2.ModeA(), p2.ModeB())))
+	// ── PIT (0xE800) ──
+	modes := []string{"0:IO", "1:OS", "2:Rate", "3:SqWv", "4:STB", "5:HC"}
+	accs := []string{"?", "LSB", "MSB", "16bit"}
+	a.pioLbl.Add(monoLabel("── PIT (E800) ──"))
+	for i := 0; i < 3; i++ {
+		m := int(a.PIT.CounterMode(i))
+		ma := "?"; if m >= 0 && m < len(modes) { ma = modes[m] }
+		af := int(a.PIT.CounterAccess(i)); aa := "?"; if af >= 0 && af < len(accs) { aa = accs[af] }
+		a.pioLbl.Add(monoLabel(fmt.Sprintf("  CNT%d: %04X  mode=%s  acc=%s",
+			i, a.PIT.CounterVal(i), ma, aa)))
+	}
+	// ── USART (0xEC00) ──
+	u := a.USART
+	s := u.Status()
+	a.pioLbl.Add(monoLabel("── USART (EC00) ──"))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  ST: %s (%02X) TXRDY:%d RXRDY:%d OVRN:%d FE:%d PE:%d",
+		bin(s), s,
+		b2i(s&usart8251.StatusTxReady != 0),
+		b2i(s&usart8251.StatusRxReady != 0),
+		b2i(s&usart8251.StatusOverrun != 0),
+		b2i(s&usart8251.StatusFraming != 0),
+		b2i(s&usart8251.StatusParity != 0),
+	)))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  CMD: %s  (%02X)", bin(u.Command()), u.Command())))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  MODE: %s  (%02X)", bin(u.Mode()), u.Mode())))
+	// ── External ──
+	a.pioLbl.Add(monoLabel("── EXTERNAL ──"))
+	a.pioLbl.Add(monoLabel(fmt.Sprintf("  DIP LEDs (PPI1.A): %s", bin(p1.PortA()))))
+	a.pioLbl.Add(monoLabel("  Keyboard 2×6: (TODO)"))
+	a.pioLbl.Add(monoLabel("  Pen sensors: (TODO)"))
+	a.pioLbl.Add(monoLabel("  Pen magazine: (TODO)"))
+}
+func b2i(b bool) int { if b { return 1 }; return 0 }
 func (a *AftografApp) clearPlot() {
 	a.Plot.Lines = nil; a.Plot.Reset(); a.HPGL = hpgl.New(); a.hpglStep = 0
 	if a.progBar != nil { a.progBar.SetValue(0) }; if a.plotRast != nil { a.plotRast.Refresh() }
@@ -716,10 +776,16 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	bpScroll := container.NewScroll(a.bpLbl)
 	bpCard := widget.NewCard("Breakpoints", "", bpScroll)
 	a.refreshBreakpoints()
+	// PIO panel
+	a.pioLbl = container.NewVBox()
+	pioScroll := container.NewScroll(a.pioLbl)
+	pioCard := widget.NewCard("I/O", "", pioScroll)
+	a.refreshPIO()
 	leftTabs := container.NewAppTabs(
 		container.NewTabItem("CPU", regCard),
 		container.NewTabItem("Stack", stackCard),
 		container.NewTabItem("BP", bpCard),
+		container.NewTabItem("I/O", pioCard),
 	)
 	leftCol := container.New(layout.NewVBoxLayout(), leftTabs, usartB)
 	leftSc := container.NewScroll(leftCol)

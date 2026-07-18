@@ -195,3 +195,9 @@ func (u *USART8251) Mode() byte { return u.mode }
 func (u *USART8251) ResetAcknowledged() bool {
 	return !u.hasMode
 }
+
+// Status returns the current status register value.
+func (u *USART8251) Status() byte { return u.status }
+
+// Data returns the last received data byte.
+func (u *USART8251) Data() byte { return u.rxBuf }
