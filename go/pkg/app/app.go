@@ -308,7 +308,7 @@ func (a *AftografApp) memJump(ad uint16) {
 		// bottom; scrolling to id+viewportRows places id at the top.
 		a.memList.ScrollTo(0)
 		a.memList.Refresh()
-		scrollTo := id + 15 // ≈ visible rows in memory viewport
+		scrollTo := id + 17 // ≈ visible rows in memory viewport
 		if scrollTo > 4095 { scrollTo = 4095 }
 		a.memList.ScrollTo(widget.ListItemID(scrollTo))
 	}
@@ -612,7 +612,6 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	a.regEdit[2].OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.C = uint8(v); a.syncUI() } }
 	a.regEdit[3].OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.D = uint8(v); a.syncUI() } }
 	a.regEdit[4].OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.E = uint8(v); a.syncUI() } }
-	a.regEdit[5].OnSubmitted = func(s string) { if v, e := strconv.ParseUint(s, 16, 8); e == nil { a.CPU.SP = uint16(v); a.syncUI() } }
 
 	regBox := container.New(&compactVBox{})
 	// Row 1: A
@@ -641,11 +640,12 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		monoLabel("H:"), a.regH,
 		monoLabel("L:"), a.regL,
 	))
-	// Row 5: SP button + entry + PC label (regDisp[5] already shows "PC:XXXX")
-	regBox.Add(container.New(&compactHBox{},
+	// Row 5: SP button + entry + PC label
+	// Use regular HBox for proper entry width allocation
+	regBox.Add(container.NewHBox(
 		a.regSPb, a.regEdit[5], a.regDisp[5],
 	))
-	// Row 6: Cycles (regDisp[7] shows "Cycles: 0")
+	// Row 6: Cycles
 	regBox.Add(container.New(&compactHBox{},
 		a.regDisp[7],
 	))
