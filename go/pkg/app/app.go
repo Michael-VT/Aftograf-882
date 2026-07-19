@@ -107,8 +107,9 @@ func buttonLabel(txt string, fn func()) *widget.Button {
 // Uses the same natural row height as the disassembler list.
 type clickLabel struct {
 	widget.Label
-	onTap   func()
-	onTapAt func(*fyne.PointEvent)
+	onTap     func()
+	onTapAt   func(*fyne.PointEvent)
+	textColor color.Color
 }
 
 func (c *clickLabel) Tapped(ev *fyne.PointEvent) {
@@ -130,8 +131,58 @@ func (c *clickLabel) MinSize() fyne.Size {
 	}
 	return fyne.NewSize(s.Width, textHeight)
 }
+
+func (c *clickLabel) CreateRenderer() fyne.WidgetRenderer {
+	textColor := c.textColor
+	if textColor == nil {
+		textColor = color.RGBA{200, 200, 200, 255}
+	}
+	text := canvas.NewText(c.Text, textColor)
+	text.TextStyle = c.TextStyle
+	return &clickLabelRenderer{label: c, text: text}
+}
+
+func (c *clickLabel) Refresh() {
+	c.BaseWidget.Refresh()
+}
+
+func (c *clickLabel) SetText(text string) {
+	c.Text = text
+	c.Refresh()
+}
+
+type clickLabelRenderer struct {
+	label *clickLabel
+	text  *canvas.Text
+}
+
+func (r *clickLabelRenderer) Destroy() {}
+
+func (r *clickLabelRenderer) Layout(size fyne.Size) {
+	r.text.Resize(size)
+}
+
+func (r *clickLabelRenderer) MinSize() fyne.Size {
+	return r.text.MinSize()
+}
+
+func (r *clickLabelRenderer) Objects() []fyne.CanvasObject {
+	return []fyne.CanvasObject{r.text}
+}
+
+func (r *clickLabelRenderer) Refresh() {
+	textColor := r.label.textColor
+	if textColor == nil {
+		textColor = color.RGBA{200, 200, 200, 255}
+	}
+	r.text.Text = r.label.Text
+	r.text.TextStyle = r.label.TextStyle
+	r.text.Color = textColor
+	r.text.Refresh()
+}
+
 func newClickLabel(text string, fn func()) *clickLabel {
-	c := &clickLabel{onTap: fn}
+	c := &clickLabel{onTap: fn, textColor: color.RGBA{200, 200, 200, 255}}
 	c.Text = text
 	c.TextStyle = fyne.TextStyle{Monospace: true}
 	c.Wrapping = fyne.TextTruncate
@@ -1341,7 +1392,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	for _, l := range a.stackLbl {
 		stackCol.Add(l)
 	}
-	stackCard := widget.NewCard("Stack", "", container.New(layout.NewVBoxLayout(), stackCol))
+	stackCard := widget.NewCard("Stack", "", container.NewVScroll(stackCol))
 	// USART
 	uE := widget.NewEntry()
 	uE.SetPlaceHolder("hex (01 02 FF)")
@@ -1401,12 +1452,12 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	)
 	// Breakpoints panel
 	a.bpLbl = container.NewVBox()
-	bpScroll := container.NewScroll(a.bpLbl)
+	bpScroll := container.NewVScroll(a.bpLbl)
 	bpCard := widget.NewCard("Breakpoints", "", bpScroll)
 	a.refreshBreakpoints()
 	// PIO panel
 	a.pioLbl = container.NewVBox()
-	pioScroll := container.NewScroll(a.pioLbl)
+	pioScroll := container.NewVScroll(a.pioLbl)
 	pioCard := widget.NewCard("I/O", "", pioScroll)
 	a.refreshPIO()
 	leftTabs := container.NewAppTabs(
@@ -1414,9 +1465,9 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		container.NewTabItem("Stack", stackCard),
 		container.NewTabItem("BP", bpCard),
 		container.NewTabItem("I/O", pioCard),
+		container.NewTabItem("USART", usartB),
 	)
-	leftCol := container.New(layout.NewVBoxLayout(), leftTabs, usartB)
-	leftSc := container.NewScroll(leftCol)
+	leftSc := container.NewVScroll(leftTabs)
 
 	// ── CENTER: Disassembler ──
 	a.dsEntry = widget.NewEntry()
@@ -1617,6 +1668,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 			}
 			row.SetText(fmt.Sprintf("%04X  %s  |%s|", base, hexSb.String(), asciiSb.String()))
 			row.TextStyle = mono
+			row.textColor = memColor(base)
 			row.onTap = func() { a.editMemoryByte(base) }
 			row.onTapAt = func(ev *fyne.PointEvent) {
 				char := canvas.NewText("0", color.White)
