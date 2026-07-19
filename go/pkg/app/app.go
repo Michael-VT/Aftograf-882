@@ -226,12 +226,19 @@ func memoryByteAtColumn(column int) (int, bool) {
 type debugLabel struct {
 	widget.Label
 	rowHeight float32
+	compact   bool
 }
 
 func (l *debugLabel) MinSize() fyne.Size {
 	s := l.Label.MinSize()
 	if l.rowHeight > 0 {
 		s.Height = l.rowHeight
+	}
+	if l.compact {
+		// Long I/O descriptions must not force the whole left splitter wider
+		// than its configured share. The label is allowed to clip/truncate when
+		// the user makes the panel narrow and can be read in a wider panel.
+		s.Width = 0
 	}
 	return s
 }
@@ -241,6 +248,12 @@ func newDebugLabel(text string, rowHeight float32) *debugLabel {
 	l.Text = text
 	l.TextStyle = fyne.TextStyle{Monospace: true}
 	l.ExtendBaseWidget(l)
+	return l
+}
+
+func newCompactDebugLabel(text string, rowHeight float32) *debugLabel {
+	l := newDebugLabel(text, rowHeight)
+	l.compact = true
 	return l
 }
 
@@ -1045,10 +1058,10 @@ func (a *AftografApp) refreshPIO() {
 	}
 	a.pioLbl.RemoveAll()
 	addRow := func(name, address, data, description string) {
-		a.pioLbl.Add(newDebugLabel(fmt.Sprintf("%-14s %-5s %-18s %s", name, address, data, description), a.debugRowHeight))
+		a.pioLbl.Add(newCompactDebugLabel(fmt.Sprintf("%-14s %-5s %-18s %s", name, address, data, description), a.debugRowHeight))
 	}
 	addSection := func(title string) {
-		a.pioLbl.Add(newDebugLabel(title, a.debugRowHeight))
+		a.pioLbl.Add(newCompactDebugLabel(title, a.debugRowHeight))
 	}
 	bin := func(v uint8) string {
 		s := ""
@@ -1136,7 +1149,7 @@ func (a *AftografApp) refreshHardwareStatus() {
 	keys, limits, dip := a.hardwareSnapshot()
 	rows := keyboardRowsForColumn(a.PPI1.PortC(), keys)
 	sensors := sensorInputByte(limits, dip)
-	a.hardwareStatus.SetText(fmt.Sprintf("LIVE inputs  PPI1.A rows:%02X  PPI1.B sensors:%02X  PPI1.C scan:%02X", rows, sensors, a.PPI1.PortC()&0x03))
+	a.hardwareStatus.SetText(fmt.Sprintf("LIVE  A:%02X  B:%02X  Cscan:%02X", rows, sensors, a.PPI1.PortC()&0x03))
 }
 func b2i(b bool) int {
 	if b {
@@ -1657,7 +1670,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 			keyboardGrid.Add(a.keyboardChecks[r][c])
 		}
 	}
-	keyboardHint := monoLabel("Клик по ячейке меняет состояние; чтение идёт на каждом обращении CPU к PPI.")
+	keyboardHint := monoLabel("Нажатия клавиш применяются сразу, включая Run.")
 	keyboardCard := smallCard("Keyboard 6×2", container.NewVBox(keyboardHint, keyboardGrid))
 
 	limitBox := container.NewHBox()
@@ -1694,7 +1707,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		monoLabel("DIP switches (PPI1.B bits 4..7)"),
 		dipBox,
 		ledBox,
-		monoLabel("Pen sensors are shown live from the plotter state; axis/DIP inputs above are operator-controlled."),
+		monoLabel("Pen: auto. X/Y limits и DIP управляются вручную."),
 	))
 	hardwarePage := container.NewVScroll(container.NewVBox(
 		smallCard("Hardware simulation", container.NewVBox(
