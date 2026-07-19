@@ -1712,7 +1712,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	hardwarePage := container.NewVScroll(container.NewVBox(
 		smallCard("Hardware simulation", container.NewVBox(
 			a.hardwareStatus,
-			monoLabel("Inputs are sampled live during Run; no pause is required."),
+			monoLabel("Live during Run; pause not required."),
 		)),
 		keyboardCard,
 		sensorCard,
