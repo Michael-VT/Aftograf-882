@@ -17,22 +17,22 @@ const (
 type CounterMode int
 
 const (
-	Mode0InterruptOnTerminalCount CounterMode = 0 // interrupt on terminal count
+	Mode0InterruptOnTerminalCount     CounterMode = 0 // interrupt on terminal count
 	Mode1HardwareRetriggerableOneShot CounterMode = 1
-	Mode2RateGenerator            CounterMode = 2
-	Mode3SquareWave               CounterMode = 3
-	Mode4SoftwareTriggeredStrobe  CounterMode = 4
-	Mode5HardwareTriggeredStrobe  CounterMode = 5
+	Mode2RateGenerator                CounterMode = 2
+	Mode3SquareWave                   CounterMode = 3
+	Mode4SoftwareTriggeredStrobe      CounterMode = 4
+	Mode5HardwareTriggeredStrobe      CounterMode = 5
 )
 
 // AccessFormat controls how 16-bit counter values are read/written.
 type AccessFormat int
 
 const (
-	AccessLatchCount          AccessFormat = 0 // counter latch command
-	AccessLowByteOnly         AccessFormat = 1
-	AccessHighByteOnly        AccessFormat = 2
-	AccessLowThenHigh         AccessFormat = 3
+	AccessLatchCount   AccessFormat = 0 // counter latch command
+	AccessLowByteOnly  AccessFormat = 1
+	AccessHighByteOnly AccessFormat = 2
+	AccessLowThenHigh  AccessFormat = 3
 )
 
 // counterState holds the runtime state of one 8253 counter.
@@ -54,8 +54,10 @@ type counterState struct {
 	count uint16
 
 	// Latched values for read-back.
-	latchCount *uint16
+	latchCount  *uint16
 	latchStatus *statusLatch
+	writePhase  bool
+	readPhase   bool
 }
 
 // statusLatch carries the latched status byte.
@@ -64,6 +66,7 @@ type statusLatch struct {
 	// Bits: 7-6 = null / access format, 5-4 = mode (upper), 3-1 = mode (lower), 0 = BCD.
 	// The OUT pin state is not modelled here.
 	nullCount bool // when true, the count is null
+	value     uint8
 }
 
 // PIT8253 emulates one 8253 chip with three counters.
@@ -147,12 +150,15 @@ func (p *PIT8253) writeCounter(idx int, val uint8) {
 	case AccessHighByteOnly:
 		c.reload = uint16(val) << 8
 	case AccessLowThenHigh:
-		if c.access == AccessLowThenHigh && c.reload&0x00FF != 0 {
-			// Second write (high byte after low).
+		if c.writePhase {
+			// Second write (high byte after low). The phase bit is required
+			// because a valid low byte may be zero.
 			c.reload = (c.reload & 0x00FF) | (uint16(val) << 8)
+			c.writePhase = false
 		} else {
 			// First write (low byte).
 			c.reload = uint16(val)
+			c.writePhase = true
 		}
 	default:
 		return // latch command, not a write
@@ -166,27 +172,45 @@ func (p *PIT8253) writeCounter(idx int, val uint8) {
 
 func (p *PIT8253) readCounter(idx int) uint8 {
 	c := &p.counters[idx]
-	return uint8(c.count & 0xFF)
+	value := c.count
+	if c.latchCount != nil {
+		value = *c.latchCount
+	}
+	switch c.access {
+	case AccessHighByteOnly:
+		return uint8(value >> 8)
+	case AccessLowThenHigh:
+		if c.readPhase {
+			c.readPhase = false
+			if c.latchCount != nil {
+				c.latchCount = nil
+			}
+			return uint8(value >> 8)
+		}
+		c.readPhase = true
+		return uint8(value)
+	default:
+		return uint8(value)
+	}
 }
 
 func (p *PIT8253) writeControl(val uint8) {
 	// Bits 7-6: counter select
 	sel := val >> 6
 	if sel == 3 {
-		// Read-back command (82C54, not original 8253, but widely supported).
-		// Bits: 0 = latch status, 1 = latch count, 2-3 = counter selects.
-		if val&0x01 != 0 { // latch status
-			for i := 0; i < 3; i++ {
-				if sel == 3 || val&(0x04>>i) != 0 {
-					p.latchStatus(i)
-				}
+		// Read-back command (supported by the 82C54-compatible devices used
+		// by most PC emulators): D5=0 latches count, D4=0 latches status,
+		// D3..D1 select counters with an active-low bit.
+		for i := 0; i < 3; i++ {
+			selected := val&(1<<uint(i+1)) == 0
+			if !selected {
+				continue
 			}
-		}
-		if val&0x02 != 0 { // latch count
-			for i := 0; i < 3; i++ {
-				if sel == 3 || val&(0x04>>i) != 0 {
-					p.latchCounter(i)
-				}
+			if val&0x20 == 0 {
+				p.latchCounter(i)
+			}
+			if val&0x10 == 0 {
+				p.latchStatus(i)
 			}
 		}
 		return
@@ -201,6 +225,8 @@ func (p *PIT8253) writeControl(val uint8) {
 	// Clear any pending latch.
 	c.latchCount = nil
 	c.latchStatus = nil
+	c.writePhase = false
+	c.readPhase = false
 }
 
 // latchCounter latches the current count for read-back.
@@ -208,6 +234,7 @@ func (p *PIT8253) latchCounter(idx int) {
 	c := &p.counters[idx]
 	v := c.count
 	c.latchCount = &v
+	c.readPhase = false
 }
 
 // latchStatus latches the current status for read-back.
@@ -220,29 +247,37 @@ func (p *PIT8253) latchStatus(idx int) {
 	}
 	null := c.latchCount == nil // count has been read since last latch
 	c.latchStatus = &statusLatch{nullCount: null}
-	_ = st // status byte available for read-back if needed
+	c.latchStatus.value = st
 }
 
 // CounterVal returns the current 16-bit count value of counter idx (0-2).
 func (p *PIT8253) CounterVal(idx int) uint16 {
-	if idx < 0 || idx > 2 { return 0 }
+	if idx < 0 || idx > 2 {
+		return 0
+	}
 	return p.counters[idx].count
 }
 
 // CounterMode returns the operating mode of counter idx (0-2).
 func (p *PIT8253) CounterMode(idx int) CounterMode {
-	if idx < 0 || idx > 2 { return 0 }
+	if idx < 0 || idx > 2 {
+		return 0
+	}
 	return p.counters[idx].mode
 }
 
 // CounterReload returns the reload value of counter idx (0-2).
 func (p *PIT8253) CounterReload(idx int) uint16 {
-	if idx < 0 || idx > 2 { return 0 }
+	if idx < 0 || idx > 2 {
+		return 0
+	}
 	return p.counters[idx].reload
 }
 
 // CounterAccess returns the access format of counter idx (0-2).
 func (p *PIT8253) CounterAccess(idx int) AccessFormat {
-	if idx < 0 || idx > 2 { return 0 }
+	if idx < 0 || idx > 2 {
+		return 0
+	}
 	return p.counters[idx].access
 }

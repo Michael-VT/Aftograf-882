@@ -10,7 +10,7 @@ type mockIODevice struct {
 	regs [4]byte
 }
 
-func (m *mockIODevice) Read(port int) uint8    { return m.regs[port] }
+func (m *mockIODevice) Read(port int) uint8       { return m.regs[port] }
 func (m *mockIODevice) Write(port int, val uint8) { m.regs[port] = val }
 
 func TestNewMMU(t *testing.T) {

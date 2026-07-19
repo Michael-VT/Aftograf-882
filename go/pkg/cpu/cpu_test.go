@@ -179,7 +179,7 @@ func TestLDAX_STAX(t *testing.T) {
 	m2 := make([]uint8, 65536)
 	copy(m2, []uint8{
 		0x01, 0x00, 0x60, // LXI B, 0x6000
-		0x02,             // STAX B
+		0x02, // STAX B
 	})
 	read2 := func(addr uint16) uint8 { return m2[addr] }
 	write2 := func(addr uint16, val uint8) { m2[addr] = val }
@@ -196,7 +196,7 @@ func TestLDAX_STAX(t *testing.T) {
 	m3 := make([]uint8, 65536)
 	copy(m3, []uint8{
 		0x11, 0x10, 0x60, // LXI D, 0x6010
-		0x12,             // STAX D
+		0x12, // STAX D
 	})
 	read3 := func(addr uint16) uint8 { return m3[addr] }
 	write3 := func(addr uint16, val uint8) { m3[addr] = val }
@@ -226,7 +226,7 @@ func TestSTA_LDA(t *testing.T) {
 	// LDA: load A from address
 	m4 := make([]uint8, 65536)
 	copy(m4, []uint8{0x3a, 0x00, 0x62}) // LDA 0x6200
-	m4[0x6200] = 0x9a // value in data space
+	m4[0x6200] = 0x9a                   // value in data space
 	read4 := func(addr uint16) uint8 { return m4[addr] }
 	write4 := func(addr uint16, val uint8) { m4[addr] = val }
 	cpu3 := New(read4, write4, nil, nil)
@@ -310,7 +310,7 @@ func TestADD(t *testing.T) {
 	cpu2.L = 0x00
 	cpu2.A = 0x01
 	cpu2.WriteByte(0x6000, 0x05) // put value at [HL]
-	cpu2.PC = 0                 // restart
+	cpu2.PC = 0                  // restart
 	cpu2.Step()
 	if cpu2.A != 0x06 {
 		t.Errorf("ADD M: A = 0x%02X, want 0x06", cpu2.A)
@@ -328,11 +328,11 @@ func TestADI(t *testing.T) {
 
 func TestADC(t *testing.T) {
 	tests := []struct {
-		name      string
-		a, val    uint8
-		carryIn   uint8
-		wantA     uint8
-		wantCY    bool
+		name    string
+		a, val  uint8
+		carryIn uint8
+		wantA   uint8
+		wantCY  bool
 	}{
 		{"1+1+0", 1, 1, 0, 2, false},
 		{"0xff+1+0", 0xff, 1, 0, 0x00, true},
@@ -378,14 +378,14 @@ func TestSUB(t *testing.T) {
 		wantS  bool
 		wantP  bool
 	}{
-		{"5-3", 5, 3, 2, false, false, false, false, false}, // 2=10b, odd→P=0
-		{"0-0", 0, 0, 0, false, false, true, false, true},   // 0, even→P=1
-		{"3-5 (borrow)", 3, 5, 0xfe, true, true, false, true, false}, // 0xfe=11111110, odd→P=0
-		{"0x80-1", 0x80, 1, 0x7f, false, true, false, false, false}, // 0x7f=01111111, odd→P=0
-		{"1-0x80", 1, 0x80, 0x81, true, false, false, true, true}, // 0x81=10000001, even→P=1, AC: 1<0→false
-		{"0-1", 0, 1, 0xff, true, true, false, true, true}, // 0xff=11111111, even→P=1
+		{"5-3", 5, 3, 2, false, false, false, false, false},               // 2=10b, odd→P=0
+		{"0-0", 0, 0, 0, false, false, true, false, true},                 // 0, even→P=1
+		{"3-5 (borrow)", 3, 5, 0xfe, true, true, false, true, false},      // 0xfe=11111110, odd→P=0
+		{"0x80-1", 0x80, 1, 0x7f, false, true, false, false, false},       // 0x7f=01111111, odd→P=0
+		{"1-0x80", 1, 0x80, 0x81, true, false, false, true, true},         // 0x81=10000001, even→P=1, AC: 1<0→false
+		{"0-1", 0, 1, 0xff, true, true, false, true, true},                // 0xff=11111111, even→P=1
 		{"0x0f-1 (AC)", 0x0f, 1, 0x0e, false, false, false, false, false}, // 0x0e=00001110, odd→P=0
-		{"0x10-1 (AC)", 0x10, 1, 0x0f, false, true, false, false, true}, // 0x0f=00001111, even→P=1
+		{"0x10-1 (AC)", 0x10, 1, 0x0f, false, true, false, false, true},   // 0x0f=00001111, even→P=1
 	}
 	for _, tc := range tests {
 		t.Run("SUB_"+tc.name, func(t *testing.T) {
@@ -412,11 +412,11 @@ func TestSUI(t *testing.T) {
 
 func TestSBB(t *testing.T) {
 	tests := []struct {
-		name      string
-		a, val    uint8
-		carryIn   uint8
-		wantA     uint8
-		wantCY    bool
+		name    string
+		a, val  uint8
+		carryIn uint8
+		wantA   uint8
+		wantCY  bool
 	}{
 		{"5-3-0", 5, 3, 0, 2, false},
 		{"5-3-1", 5, 3, FlagCY, 1, false},
@@ -507,11 +507,11 @@ func TestDCR(t *testing.T) {
 
 func TestINX_DCX(t *testing.T) {
 	tests := []struct {
-		name   string
-		inx    []uint8
-		dcx    []uint8
-		getFn  func(*CPU8080) uint16
-		setFn  func(*CPU8080, uint16)
+		name  string
+		inx   []uint8
+		dcx   []uint8
+		getFn func(*CPU8080) uint16
+		setFn func(*CPU8080, uint16)
 	}{
 		{"B", []uint8{0x03}, []uint8{0x0b}, func(c *CPU8080) uint16 { return c.GetBC() }, func(c *CPU8080, v uint16) { c.setBC(v) }},
 		{"D", []uint8{0x13}, []uint8{0x1b}, func(c *CPU8080) uint16 { return c.GetDE() }, func(c *CPU8080, v uint16) { c.setDE(v) }},
@@ -540,12 +540,12 @@ func TestINX_DCX(t *testing.T) {
 
 func TestDAD(t *testing.T) {
 	tests := []struct {
-		name       string
-		code       []uint8
-		hl, rp     uint16
-		setRP      func(*CPU8080, uint16)
-		wantHL     uint16
-		wantCY     bool
+		name   string
+		code   []uint8
+		hl, rp uint16
+		setRP  func(*CPU8080, uint16)
+		wantHL uint16
+		wantCY bool
 	}{
 		{"DAD B", []uint8{0x09}, 0x0001, 0x0001, func(c *CPU8080, v uint16) { c.setBC(v) }, 0x0002, false},
 		{"DAD D", []uint8{0x19}, 0xffff, 0x0001, func(c *CPU8080, v uint16) { c.setDE(v) }, 0x0000, true},
@@ -787,12 +787,12 @@ func TestRotates(t *testing.T) {
 
 func TestDAA(t *testing.T) {
 	tests := []struct {
-		name     string
-		a        uint8
-		flagsIn  uint8
-		wantA    uint8
-		wantAC   bool
-		wantCY   bool
+		name    string
+		a       uint8
+		flagsIn uint8
+		wantA   uint8
+		wantAC  bool
+		wantCY  bool
 	}{
 		{"0x00", 0x00, 0x02, 0x00, false, false},
 		{"0x09", 0x09, 0x02, 0x09, false, false},
@@ -837,9 +837,9 @@ func TestJMP(t *testing.T) {
 func TestConditionalJumps(t *testing.T) {
 	// Opcodes: JNZ(0xc2), JZ(0xca), JNC(0xd2), JC(0xda), JPO(0xe2), JPE(0xea), JP(0xf2), JM(0xfa)
 	type jumpTest struct {
-		code     uint8
-		cond     func(*CPU8080) bool
-		name     string
+		code uint8
+		cond func(*CPU8080) bool
+		name string
 	}
 	jumps := []jumpTest{
 		{0xc2, func(c *CPU8080) bool { return c.Flags&FlagZ == 0 }, "JNZ"},
@@ -918,7 +918,7 @@ func TestCALL_RET(t *testing.T) {
 	mem2 := make([]uint8, 65536)
 	copy(mem2, []uint8{
 		0xcd, 0x10, 0x00, // CALL 0x0010
-		0x76,             // HLT
+		0x76, // HLT
 	})
 	mem2[0x10] = 0xc9 // RET at 0x0010
 	read2 := func(addr uint16) uint8 { return mem2[addr] }
@@ -939,7 +939,7 @@ func TestCALL_RET(t *testing.T) {
 func TestConditionalCalls(t *testing.T) {
 	// CNZ (0xc4) taken: Z=0 → jump
 	cpu, _ := testCPU(t, []uint8{0xc4, 0x78, 0x56}) // CNZ 0x5678
-	cpu.Flags = 0x02 // Z=0
+	cpu.Flags = 0x02                                // Z=0
 	cpu.SP = 0xfffe
 	pcBefore := cpu.PC
 	cpu.Step()
@@ -977,8 +977,8 @@ func TestConditionalReturns(t *testing.T) {
 	// RNZ (0xc0) taken: Z=0 → return
 	code := []uint8{
 		0xcd, 0x04, 0x00, // CALL 0x0004
-		0x76,             // HLT
-		0xc0,             // RNZ (Z=0 → return) at address 4
+		0x76, // HLT
+		0xc0, // RNZ (Z=0 → return) at address 4
 	}
 	mem := make([]uint8, 65536)
 	copy(mem, code)
@@ -987,7 +987,7 @@ func TestConditionalReturns(t *testing.T) {
 	cpu := New(read, write, nil, nil)
 	cpu.SP = 0xfffe
 	cpu.Flags = 0x02 // Z=0 → RNZ taken
-	stepN(cpu, 2)     // CALL + RNZ
+	stepN(cpu, 2)    // CALL + RNZ
 	if cpu.PC != 3 {
 		t.Errorf("CALL+RNZ: PC = 0x%04X, want 0x0003", cpu.PC)
 	}
@@ -995,9 +995,9 @@ func TestConditionalReturns(t *testing.T) {
 	// RZ (0xc8) not taken: Z=0 → fall through
 	code2 := []uint8{
 		0xcd, 0x04, 0x00, // CALL 0x0004
-		0x76,             // HLT
-		0xc8,             // RZ (not taken: Z=0) at address 4
-		0x76,             // HLT at address 5
+		0x76, // HLT
+		0xc8, // RZ (not taken: Z=0) at address 4
+		0x76, // HLT at address 5
 	}
 	mem2 := make([]uint8, 65536)
 	copy(mem2, code2)
@@ -1071,8 +1071,8 @@ func TestPUSH_POP_PSW(t *testing.T) {
 func TestXTHL(t *testing.T) {
 	m2 := make([]uint8, 65536)
 	copy(m2, []uint8{0xe3}) // XTHL
-	m2[0x6000] = 0xaa // L at stack top
-	m2[0x6001] = 0xbb // H at stack top+1
+	m2[0x6000] = 0xaa       // L at stack top
+	m2[0x6001] = 0xbb       // H at stack top+1
 	read2 := func(addr uint16) uint8 { return m2[addr] }
 	write2 := func(addr uint16, val uint8) { m2[addr] = val }
 	cpu := New(read2, write2, nil, nil)
@@ -1264,7 +1264,7 @@ func TestSTC_CMC(t *testing.T) {
 		t.Error("CMC: CY should be clear (was set)")
 	}
 	cpu3, _ := testCPU(t, []uint8{0x3f}) // CMC
-	cpu3.Flags = 0x02 // CY=0
+	cpu3.Flags = 0x02                    // CY=0
 	cpu3.Step()
 	if cpu3.Flags&FlagCY == 0 {
 		t.Error("CMC: CY should be set (was clear)")
@@ -1389,4 +1389,3 @@ func checkFlags8080(t *testing.T, flags uint8, wantS, wantZ, wantAC, wantP, want
 		t.Error("bit 1 not set (should always be 1)")
 	}
 }
-

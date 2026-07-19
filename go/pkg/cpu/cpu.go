@@ -13,12 +13,12 @@ const (
 // CPU8080 emulates an Intel 8080 processor.
 type CPU8080 struct {
 	A, B, C, D, E, H, L uint8
-	SP, PC               uint16
-	Flags                uint8
-	Cycles               uint64
-	Intr                 bool // interrupt pending
-	IE                   bool // interrupt enabled
-	Halt                 bool
+	SP, PC              uint16
+	Flags               uint8
+	Cycles              uint64
+	Intr                bool // interrupt pending
+	IE                  bool // interrupt enabled
+	Halt                bool
 
 	ReadByte  func(uint16) uint8
 	WriteByte func(uint16, uint8)
@@ -73,16 +73,15 @@ func (c *CPU8080) popStack() uint16 {
 	return hi<<8 | lo
 }
 
-func (c *CPU8080) GetBC() uint16 { return uint16(c.B)<<8 | uint16(c.C) }
-func (c *CPU8080) GetDE() uint16 { return uint16(c.D)<<8 | uint16(c.E) }
-func (c *CPU8080) GetHL() uint16 { return uint16(c.H)<<8 | uint16(c.L) }
-func (c *CPU8080) getBC() uint16 { return c.GetBC() }
-func (c *CPU8080) getDE() uint16 { return c.GetDE() }
-func (c *CPU8080) getHL() uint16 { return c.GetHL() }
+func (c *CPU8080) GetBC() uint16  { return uint16(c.B)<<8 | uint16(c.C) }
+func (c *CPU8080) GetDE() uint16  { return uint16(c.D)<<8 | uint16(c.E) }
+func (c *CPU8080) GetHL() uint16  { return uint16(c.H)<<8 | uint16(c.L) }
+func (c *CPU8080) getBC() uint16  { return c.GetBC() }
+func (c *CPU8080) getDE() uint16  { return c.GetDE() }
+func (c *CPU8080) getHL() uint16  { return c.GetHL() }
 func (c *CPU8080) setBC(v uint16) { c.B, c.C = uint8(v>>8), uint8(v) }
 func (c *CPU8080) setDE(v uint16) { c.D, c.E = uint8(v>>8), uint8(v) }
 func (c *CPU8080) setHL(v uint16) { c.H, c.L = uint8(v>>8), uint8(v) }
-
 
 // Step executes one instruction and returns false if HALTed.
 func (c *CPU8080) Step() bool {
@@ -512,130 +511,186 @@ func (c *CPU8080) Step() bool {
 	case 0x40: // MOV B, B
 		c.Cycles += 5
 	case 0x41: // MOV B, C
-		c.B = c.C; c.Cycles += 5
+		c.B = c.C
+		c.Cycles += 5
 	case 0x42: // MOV B, D
-		c.B = c.D; c.Cycles += 5
+		c.B = c.D
+		c.Cycles += 5
 	case 0x43: // MOV B, E
-		c.B = c.E; c.Cycles += 5
+		c.B = c.E
+		c.Cycles += 5
 	case 0x44: // MOV B, H
-		c.B = c.H; c.Cycles += 5
+		c.B = c.H
+		c.Cycles += 5
 	case 0x45: // MOV B, L
-		c.B = c.L; c.Cycles += 5
+		c.B = c.L
+		c.Cycles += 5
 	case 0x46: // MOV B, M
-		c.B = c.ReadByte(c.getHL()); c.Cycles += 7
+		c.B = c.ReadByte(c.getHL())
+		c.Cycles += 7
 	case 0x47: // MOV B, A
-		c.B = c.A; c.Cycles += 5
+		c.B = c.A
+		c.Cycles += 5
 	case 0x48: // MOV C, B
-		c.C = c.B; c.Cycles += 5
+		c.C = c.B
+		c.Cycles += 5
 	case 0x49: // MOV C, C
 		c.Cycles += 5
 	case 0x4a: // MOV C, D
-		c.C = c.D; c.Cycles += 5
+		c.C = c.D
+		c.Cycles += 5
 	case 0x4b: // MOV C, E
-		c.C = c.E; c.Cycles += 5
+		c.C = c.E
+		c.Cycles += 5
 	case 0x4c: // MOV C, H
-		c.C = c.H; c.Cycles += 5
+		c.C = c.H
+		c.Cycles += 5
 	case 0x4d: // MOV C, L
-		c.C = c.L; c.Cycles += 5
+		c.C = c.L
+		c.Cycles += 5
 	case 0x4e: // MOV C, M
-		c.C = c.ReadByte(c.getHL()); c.Cycles += 7
+		c.C = c.ReadByte(c.getHL())
+		c.Cycles += 7
 	case 0x4f: // MOV C, A
-		c.C = c.A; c.Cycles += 5
+		c.C = c.A
+		c.Cycles += 5
 	case 0x50: // MOV D, B
-		c.D = c.B; c.Cycles += 5
+		c.D = c.B
+		c.Cycles += 5
 	case 0x51: // MOV D, C
-		c.D = c.C; c.Cycles += 5
+		c.D = c.C
+		c.Cycles += 5
 	case 0x52: // MOV D, D
 		c.Cycles += 5
 	case 0x53: // MOV D, E
-		c.D = c.E; c.Cycles += 5
+		c.D = c.E
+		c.Cycles += 5
 	case 0x54: // MOV D, H
-		c.D = c.H; c.Cycles += 5
+		c.D = c.H
+		c.Cycles += 5
 	case 0x55: // MOV D, L
-		c.D = c.L; c.Cycles += 5
+		c.D = c.L
+		c.Cycles += 5
 	case 0x56: // MOV D, M
-		c.D = c.ReadByte(c.getHL()); c.Cycles += 7
+		c.D = c.ReadByte(c.getHL())
+		c.Cycles += 7
 	case 0x57: // MOV D, A
-		c.D = c.A; c.Cycles += 5
+		c.D = c.A
+		c.Cycles += 5
 	case 0x58: // MOV E, B
-		c.E = c.B; c.Cycles += 5
+		c.E = c.B
+		c.Cycles += 5
 	case 0x59: // MOV E, C
-		c.E = c.C; c.Cycles += 5
+		c.E = c.C
+		c.Cycles += 5
 	case 0x5a: // MOV E, D
-		c.E = c.D; c.Cycles += 5
+		c.E = c.D
+		c.Cycles += 5
 	case 0x5b: // MOV E, E
 		c.Cycles += 5
 	case 0x5c: // MOV E, H
-		c.E = c.H; c.Cycles += 5
+		c.E = c.H
+		c.Cycles += 5
 	case 0x5d: // MOV E, L
-		c.E = c.L; c.Cycles += 5
+		c.E = c.L
+		c.Cycles += 5
 	case 0x5e: // MOV E, M
-		c.E = c.ReadByte(c.getHL()); c.Cycles += 7
+		c.E = c.ReadByte(c.getHL())
+		c.Cycles += 7
 	case 0x5f: // MOV E, A
-		c.E = c.A; c.Cycles += 5
+		c.E = c.A
+		c.Cycles += 5
 	case 0x60: // MOV H, B
-		c.H = c.B; c.Cycles += 5
+		c.H = c.B
+		c.Cycles += 5
 	case 0x61: // MOV H, C
-		c.H = c.C; c.Cycles += 5
+		c.H = c.C
+		c.Cycles += 5
 	case 0x62: // MOV H, D
-		c.H = c.D; c.Cycles += 5
+		c.H = c.D
+		c.Cycles += 5
 	case 0x63: // MOV H, E
-		c.H = c.E; c.Cycles += 5
+		c.H = c.E
+		c.Cycles += 5
 	case 0x64: // MOV H, H
 		c.Cycles += 5
 	case 0x65: // MOV H, L
-		c.H = c.L; c.Cycles += 5
+		c.H = c.L
+		c.Cycles += 5
 	case 0x66: // MOV H, M
-		c.H = c.ReadByte(c.getHL()); c.Cycles += 7
+		c.H = c.ReadByte(c.getHL())
+		c.Cycles += 7
 	case 0x67: // MOV H, A
-		c.H = c.A; c.Cycles += 5
+		c.H = c.A
+		c.Cycles += 5
 	case 0x68: // MOV L, B
-		c.L = c.B; c.Cycles += 5
+		c.L = c.B
+		c.Cycles += 5
 	case 0x69: // MOV L, C
-		c.L = c.C; c.Cycles += 5
+		c.L = c.C
+		c.Cycles += 5
 	case 0x6a: // MOV L, D
-		c.L = c.D; c.Cycles += 5
+		c.L = c.D
+		c.Cycles += 5
 	case 0x6b: // MOV L, E
-		c.L = c.E; c.Cycles += 5
+		c.L = c.E
+		c.Cycles += 5
 	case 0x6c: // MOV L, H
-		c.L = c.H; c.Cycles += 5
+		c.L = c.H
+		c.Cycles += 5
 	case 0x6d: // MOV L, L
 		c.Cycles += 5
 	case 0x6e: // MOV L, M
-		c.L = c.ReadByte(c.getHL()); c.Cycles += 7
+		c.L = c.ReadByte(c.getHL())
+		c.Cycles += 7
 	case 0x6f: // MOV L, A
-		c.L = c.A; c.Cycles += 5
+		c.L = c.A
+		c.Cycles += 5
 	case 0x70: // MOV M, B
-		c.WriteByte(c.getHL(), c.B); c.Cycles += 7
+		c.WriteByte(c.getHL(), c.B)
+		c.Cycles += 7
 	case 0x71: // MOV M, C
-		c.WriteByte(c.getHL(), c.C); c.Cycles += 7
+		c.WriteByte(c.getHL(), c.C)
+		c.Cycles += 7
 	case 0x72: // MOV M, D
-		c.WriteByte(c.getHL(), c.D); c.Cycles += 7
+		c.WriteByte(c.getHL(), c.D)
+		c.Cycles += 7
 	case 0x73: // MOV M, E
-		c.WriteByte(c.getHL(), c.E); c.Cycles += 7
+		c.WriteByte(c.getHL(), c.E)
+		c.Cycles += 7
 	case 0x74: // MOV M, H
-		c.WriteByte(c.getHL(), c.H); c.Cycles += 7
+		c.WriteByte(c.getHL(), c.H)
+		c.Cycles += 7
 	case 0x75: // MOV M, L
-		c.WriteByte(c.getHL(), c.L); c.Cycles += 7
+		c.WriteByte(c.getHL(), c.L)
+		c.Cycles += 7
 	case 0x76: // HLT
 		c.Halt = true
 		c.Cycles += 7
 	case 0x77: // MOV M, A
-		c.WriteByte(c.getHL(), c.A); c.Cycles += 7
+		c.WriteByte(c.getHL(), c.A)
+		c.Cycles += 7
 	case 0x78: // MOV A, B
-		c.A = c.B; c.Cycles += 5
+		c.A = c.B
+		c.Cycles += 5
 	case 0x79: // MOV A, C
-		c.A = c.C; c.Cycles += 5
+		c.A = c.C
+		c.Cycles += 5
 	case 0x7a: // MOV A, D
-		c.A = c.D; c.Cycles += 5
+		c.A = c.D
+		c.Cycles += 5
 	case 0x7b: // MOV A, E
-		c.A = c.E; c.Cycles += 5
+		c.A = c.E
+		c.Cycles += 5
 	case 0x7c: // MOV A, H
-		c.A = c.H; c.Cycles += 5
+		c.A = c.H
+		c.Cycles += 5
 	case 0x7d: // MOV A, L
-		c.A = c.L; c.Cycles += 5
+		c.A = c.L
+		c.Cycles += 5
 	case 0x7e: // MOV A, M
-		c.A = c.ReadByte(c.getHL()); c.Cycles += 7
+		c.A = c.ReadByte(c.getHL())
+		c.Cycles += 7
 	case 0x7f: // MOV A, A
 		c.Cycles += 5
 
@@ -923,7 +978,7 @@ func (c *CPU8080) Step() bool {
 		val := c.fetchByte()
 		result := int16(c.A) - int16(val) - int16(carry)
 		a := uint8(result)
-		ac := (c.A & 0x0f) < (val & 0x0f) + (uint8(carry) & 0x0f)
+		ac := (c.A & 0x0f) < (val&0x0f)+(uint8(carry)&0x0f)
 		c.Flags = 0x02 |
 			selectBit(a&0x80 != 0, FlagS) |
 			selectBit(a == 0, FlagZ) |
@@ -1121,7 +1176,7 @@ func (c *CPU8080) opSBB(val uint8) {
 	result := int16(c.A) - int16(val) - int16(carry)
 	a := uint8(result)
 	borrow := uint16(c.A) < uint16(val)+carry
-	ac := (c.A & 0x0f) < (val & 0x0f) + (uint8(carry) & 0x0f)
+	ac := (c.A & 0x0f) < (val&0x0f)+(uint8(carry)&0x0f)
 	c.Flags = 0x02 |
 		selectBit(a&0x80 != 0, FlagS) |
 		selectBit(a == 0, FlagZ) |
@@ -1261,4 +1316,3 @@ func selectBit(cond bool, bit uint8) uint8 {
 	}
 	return 0
 }
-

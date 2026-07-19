@@ -16,46 +16,47 @@ const (
 
 // Status register bits.
 const (
-	StatusTxReady  = 0x01 // transmitter ready for data
-	StatusRxReady  = 0x02 // receiver has data available
-	StatusTxEmpty  = 0x04 // transmitter shift register empty
-	StatusParity   = 0x08 // parity error
-	StatusOverrun  = 0x10 // overrun error
-	StatusFraming  = 0x20 // framing error
-	StatusSyncDet  = 0x40 // sync detect
-	StatusDSR      = 0x80 // data set ready
+	StatusTxReady = 0x01 // transmitter ready for data
+	StatusRxReady = 0x02 // receiver has data available
+	StatusTxEmpty = 0x04 // transmitter shift register empty
+	StatusParity  = 0x08 // parity error
+	StatusOverrun = 0x10 // overrun error
+	StatusFraming = 0x20 // framing error
+	StatusSyncDet = 0x40 // sync detect
+	StatusDSR     = 0x80 // data set ready
 )
 
 // Command register bits.
 const (
-	CmdTxEnable    = 0x01
-	CmdDTR         = 0x02 // data terminal ready
-	CmdRxEnable    = 0x04
-	CmdSendBreak   = 0x08
-	CmdErrReset    = 0x10 // reset error flags
-	CmdRTS         = 0x20 // request to send
-	CmdReset       = 0x40 // internal reset
-	CmdHuntMode    = 0x80 // enter hunt mode
+	CmdTxEnable  = 0x01
+	CmdDTR       = 0x02 // data terminal ready
+	CmdRxEnable  = 0x04
+	CmdSendBreak = 0x08
+	CmdErrReset  = 0x10 // reset error flags
+	CmdRTS       = 0x20 // request to send
+	CmdReset     = 0x40 // internal reset
+	CmdHuntMode  = 0x80 // enter hunt mode
 )
 
 // Mode register bits decoded from the first command byte after reset.
 // (Bits 7-6: baud factor, 5-4: character size, 3-2: parity enable/type,
-//  1-0: stop bits.)
+//
+//	1-0: stop bits.)
 const (
-	ModeBaudFactor1x   = 0x00 // 1x clock
-	ModeBaudFactor16x  = 0x40 // 16x clock
-	ModeBaudFactor64x  = 0x80 // 64x clock
-	ModeChar5          = 0x00
-	ModeChar6          = 0x10
-	ModeChar7          = 0x20
-	ModeChar8          = 0x30
-	ModeParityDisable  = 0x00
-	ModeParityOdd      = 0x04
-	ModeParityEven     = 0x0C
-	ModeStopBitsInhibit= 0x00 // (sync mode)
-	ModeStopBits1      = 0x01
-	ModeStopBits1_5    = 0x02
-	ModeStopBits2      = 0x03
+	ModeBaudFactor1x    = 0x00 // 1x clock
+	ModeBaudFactor16x   = 0x40 // 16x clock
+	ModeBaudFactor64x   = 0x80 // 64x clock
+	ModeChar5           = 0x00
+	ModeChar6           = 0x10
+	ModeChar7           = 0x20
+	ModeChar8           = 0x30
+	ModeParityDisable   = 0x00
+	ModeParityOdd       = 0x04
+	ModeParityEven      = 0x0C
+	ModeStopBitsInhibit = 0x00 // (sync mode)
+	ModeStopBits1       = 0x01
+	ModeStopBits1_5     = 0x02
+	ModeStopBits2       = 0x03
 )
 
 // USART8251 emulates one 8251 USART.
@@ -76,6 +77,12 @@ type USART8251 struct {
 	// Internal state.
 	hasMode bool // true once mode byte has been written after reset
 	txEmpty bool // transmitter shift register + buffer both empty
+
+	// OnReceive is called after a byte arrives from the external terminal.
+	// The system emulator uses it to raise the CPU interrupt request.
+	OnReceive func()
+	// OnTransmit is called when the CPU writes a byte to the data register.
+	OnTransmit func(byte)
 }
 
 // New creates a USART8251 with all registers reset.
@@ -97,6 +104,9 @@ func (u *USART8251) Write(offset int, val byte) {
 		u.txBuf = val
 		u.status &^= StatusTxReady // transmitter busy
 		u.txEmpty = false
+		if u.OnTransmit != nil {
+			u.OnTransmit(val)
+		}
 	case CmdStatusPort:
 		if !u.hasMode {
 			u.mode = val
@@ -156,6 +166,9 @@ func (u *USART8251) ReceiveData(val byte) {
 	}
 	u.rxBuf = val
 	u.status |= StatusRxReady
+	if u.OnReceive != nil {
+		u.OnReceive()
+	}
 }
 
 // TransmitComplete signals that the transmitter has finished sending the

@@ -8,9 +8,9 @@ package ppi8255
 
 const (
 	// Port addresses relative to chip base.
-	PortA = 0
-	PortB = 1
-	PortC = 2
+	PortA   = 0
+	PortB   = 1
+	PortC   = 2
 	PortCtl = 3
 )
 
@@ -126,13 +126,21 @@ func (p *PPI8255) Control() uint8 { return p.ctl }
 
 // ModeA returns the mode of group A (0, 1, or 2).
 func (p *PPI8255) ModeA() int {
-	if p.ctl&0x40 != 0 { return 1 }
-	if p.ctl&0x20 != 0 { return 2 }
+	// 8255 group-A mode bits are D6:D5: 00=mode 0, 01=mode 1,
+	// and 1x=mode 2.
+	if p.ctl&0x40 != 0 {
+		return 2
+	}
+	if p.ctl&0x20 != 0 {
+		return 1
+	}
 	return 0
 }
 
 // ModeB returns the mode of group B (0 or 1).
 func (p *PPI8255) ModeB() int {
-	if p.ctl&0x04 != 0 { return 1 }
+	if p.ctl&0x04 != 0 {
+		return 1
+	}
 	return 0
 }

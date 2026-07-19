@@ -1,12 +1,13 @@
 // Package memory implements the Aftograf-882 memory map.
 //
 // Memory regions:
-//   0x0000-0x5FFF  ROM (24 KB, D2764A EPROMs, read-only)
-//   0x6000-0x67FF  RAM  (2 KB, KP537PY10)
-//   0xE000-0xE3FF  PPI1 (KP580BB55A #1)
-//   0xE400-0xE7FF  PPI2 (KP580BB55A #2)
-//   0xE800-0xEBFF  PIT  (KP580BM53)
-//   0xEC00-0xEFFF  USART (KP580BB51A)
+//
+//	0x0000-0x5FFF  ROM (24 KB, D2764A EPROMs, read-only)
+//	0x6000-0x67FF  RAM  (2 KB, KP537PY10)
+//	0xE000-0xE3FF  PPI1 (KP580BB55A #1)
+//	0xE400-0xE7FF  PPI2 (KP580BB55A #2)
+//	0xE800-0xEBFF  PIT  (KP580BM53)
+//	0xEC00-0xEFFF  USART (KP580BB51A)
 package memory
 
 import (
@@ -186,4 +187,19 @@ func (m *MMU) ReadROM() []byte {
 // ReadRAM returns a read-only slice of the RAM region.
 func (m *MMU) ReadRAM() []byte {
 	return m.memory[RamStart : RamEnd+1]
+}
+
+// LoadRAM restores a RAM snapshot. Extra bytes are ignored and missing bytes
+// are cleared, making sessions portable between compatible builds.
+func (m *MMU) LoadRAM(data []byte) {
+	m.ClearRAM()
+	copy(m.memory[RamStart:RamEnd+1], data)
+}
+
+// ClearRAM resets all RAM bytes without touching ROM or I/O devices.
+func (m *MMU) ClearRAM() {
+	for i := RamStart; i <= RamEnd; i++ {
+		m.memory[i] = 0
+	}
+	m.LastWriteAddr = 0
 }

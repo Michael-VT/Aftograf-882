@@ -3,8 +3,8 @@
 package plotter
 
 import (
-	"math"
 	"github.com/Michael-VT/Aftograf-882/pkg/hpgl"
+	"math"
 )
 
 // StepsPerUnit is the number of stepper motor steps per plotter unit.
@@ -39,6 +39,14 @@ type Plotter struct {
 
 	// Acceleration in steps per tick^2.
 	Accel float64
+
+	// Firmware-visible state used to build drawn segments from RAM updates.
+	lastMemInitialized     bool
+	lastMemX, lastMemY     int
+	lastMemPenDown         bool
+	lastMemPen             int
+	currentSegment         *hpgl.LineSegment
+	lastXPhase, lastYPhase uint8
 }
 
 // New creates a new Plotter with default state.
@@ -125,6 +133,60 @@ func (p *Plotter) SyncFromMemory(paramAddr uint16, readByte ReadByte) {
 	}
 }
 
+// SyncFromState updates the plotter from the coordinates and pen state that
+// the firmware exposes in RAM. Coordinates are in plotter units.
+func (p *Plotter) SyncFromState(x, y int, penDown bool, pen int) {
+	if pen < 0 {
+		pen = 0
+	}
+	if pen > 8 {
+		pen = 8
+	}
+
+	if !p.lastMemInitialized {
+		p.lastMemInitialized = true
+		p.lastMemX, p.lastMemY = x, y
+		p.XPos, p.YPos = float64(x), float64(y)
+		p.StepX, p.StepY = x*StepsPerUnit, y*StepsPerUnit
+		p.TargetStepX, p.TargetStepY = p.StepX, p.StepY
+		p.lastMemPenDown = penDown
+		p.lastMemPen = pen
+		p.PenDown, p.PenNum = penDown, pen
+		if penDown {
+			p.currentSegment = &hpgl.LineSegment{X1: x, Y1: y, X2: x, Y2: y, Pen: pen}
+		}
+		return
+	}
+
+	if pen != p.lastMemPen {
+		p.PenNum = pen
+		p.lastMemPen = pen
+	}
+	if penDown != p.lastMemPenDown {
+		if penDown {
+			p.currentSegment = &hpgl.LineSegment{X1: x, Y1: y, X2: x, Y2: y, Pen: p.PenNum}
+		} else if p.currentSegment != nil {
+			seg := *p.currentSegment
+			seg.X2, seg.Y2 = x, y
+			if seg.X1 != seg.X2 || seg.Y1 != seg.Y2 {
+				p.Lines = append(p.Lines, seg)
+			}
+			p.currentSegment = nil
+		}
+		p.PenDown = penDown
+		p.lastMemPenDown = penDown
+	}
+
+	if x != p.lastMemX || y != p.lastMemY {
+		p.XPos, p.YPos = float64(x), float64(y)
+		p.TargetStepX, p.TargetStepY = x*StepsPerUnit, y*StepsPerUnit
+		if p.PenDown && p.currentSegment != nil {
+			p.currentSegment.X2, p.currentSegment.Y2 = x, y
+		}
+		p.lastMemX, p.lastMemY = x, y
+	}
+}
+
 // UpdateStepper advances the stepper motors one tick toward the target.
 // Returns true if the stepper is still moving (not yet at target).
 func (p *Plotter) UpdateStepper() bool {
@@ -185,6 +247,46 @@ func (p *Plotter) UpdateStepper() bool {
 	return p.StepX != p.TargetStepX || p.StepY != p.TargetStepY
 }
 
+// UpdatePhase advances one axis from the 4-phase stepper pattern exposed by
+// the firmware. RAM coordinates remain the authoritative position, while the
+// phase pattern provides visible motor activity and direction.
+func (p *Plotter) UpdatePhase(axis byte, phases uint8) {
+	phase := phases & 0x0F
+	last := &p.lastXPhase
+	if axis != 'x' {
+		last = &p.lastYPhase
+	}
+	if *last != 0 && *last != phase {
+		const ring = "\x01\x03\x02\x06\x04\x0c\x08\x09"
+		find := func(v uint8) int {
+			for i := 0; i < len(ring); i++ {
+				if ring[i] == v {
+					return i
+				}
+			}
+			return -1
+		}
+		prev, next := find(*last), find(phase)
+		if prev >= 0 && next >= 0 {
+			diff := (next - prev + 8) % 8
+			if diff == 1 || diff == 2 {
+				if axis == 'x' {
+					p.StepX++
+				} else {
+					p.StepY++
+				}
+			} else if diff == 6 || diff == 7 {
+				if axis == 'x' {
+					p.StepX--
+				} else {
+					p.StepY--
+				}
+			}
+		}
+	}
+	*last = phase
+}
+
 // SetPen selects and optionally changes the pen.
 // n = 0 stows the pen; 1-8 selects the corresponding pen stall.
 func (p *Plotter) SetPen(n int) {
@@ -207,4 +309,9 @@ func (p *Plotter) Reset() {
 	p.TargetStepY = 0
 	p.VelX = 0
 	p.VelY = 0
+	p.lastMemInitialized = false
+	p.lastMemX, p.lastMemY = 0, 0
+	p.lastMemPenDown, p.lastMemPen = false, 0
+	p.currentSegment = nil
+	p.lastXPhase, p.lastYPhase = 0, 0
 }
