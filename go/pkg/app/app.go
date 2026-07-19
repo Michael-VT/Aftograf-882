@@ -96,6 +96,16 @@ func monoLabel(txt string) *widget.Label {
 	return l
 }
 
+// smallCard keeps the panel title readable while giving the dense debugger
+// layout a little more vertical room than the default Card header.
+func smallCard(title string, content fyne.CanvasObject) *widget.Card {
+	header := canvas.NewText(title, theme.ForegroundColor())
+	header.TextStyle.Bold = true
+	header.TextSize = theme.TextSize() * 0.88
+	body := container.NewBorder(header, nil, nil, nil, content)
+	return widget.NewCard("", "", body)
+}
+
 // buttonLabel is a compact clickable text button (looks like a label).
 func buttonLabel(txt string, fn func()) *widget.Button {
 	b := widget.NewButton(txt, fn)
@@ -921,7 +931,7 @@ func (a *AftografApp) refreshPIO() {
 	}
 	a.pioLbl.RemoveAll()
 	addRow := func(name, address, data, description string) {
-		a.pioLbl.Add(newDebugLabel(fmt.Sprintf("%-16s %-7s %-24s %s", name, address, data, description), a.debugRowHeight))
+		a.pioLbl.Add(newDebugLabel(fmt.Sprintf("%-14s %-5s %-18s %s", name, address, data, description), a.debugRowHeight))
 	}
 	addSection := func(title string) {
 		a.pioLbl.Add(newDebugLabel(title, a.debugRowHeight))
@@ -1097,7 +1107,46 @@ func (a *AftografApp) plotRender(w, h int) image.Image {
 	a.mu.Unlock()
 	wi, hi := max(w, 1), max(h, 1)
 	img := image.NewRGBA(image.Rect(0, 0, wi, hi))
-	draw.Draw(img, img.Bounds(), &image.Uniform{color.RGBA{245, 240, 232, 255}}, image.Point{}, draw.Src)
+	// Keep the visible paper at the physical A4 aspect ratio (210:297), even
+	// when the resizable plotter panel is wider or taller than the page.
+	const a4Aspect = 210.0 / 297.0
+	draw.Draw(img, img.Bounds(), &image.Uniform{color.RGBA{225, 225, 225, 255}}, image.Point{}, draw.Src)
+	pageW, pageH := float64(wi), float64(hi)
+	if pageW/pageH > a4Aspect {
+		pageW = pageH * a4Aspect
+	} else {
+		pageH = pageW / a4Aspect
+	}
+	pageX := (float64(wi) - pageW) / 2
+	pageY := (float64(hi) - pageH) / 2
+	pageRect := image.Rect(int(pageX), int(pageY), int(pageX+pageW), int(pageY+pageH))
+	draw.Draw(img, pageRect, &image.Uniform{color.RGBA{245, 240, 232, 255}}, image.Point{}, draw.Src)
+
+	mg := 24.0
+	if mg > pageW/8 {
+		mg = pageW / 8
+	}
+	if mg > pageH/8 {
+		mg = pageH / 8
+	}
+	drawGrid := func() {
+		gr := color.RGBA{210, 200, 180, 255}
+		for i := 0; i <= 10; i++ {
+			x := int(pageX + mg + (pageW-2*mg)*float64(i)/10.0)
+			y := int(pageY + mg + (pageH-2*mg)*float64(i)/10.0)
+			for yy := int(pageY + mg); yy < int(pageY+pageH-mg); yy++ {
+				if x >= 0 && x < wi && yy >= 0 && yy < hi {
+					img.Set(x, yy, gr)
+				}
+			}
+			for xx := int(pageX + mg); xx < int(pageX+pageW-mg); xx++ {
+				if xx >= 0 && xx < wi && y >= 0 && y < hi {
+					img.Set(xx, y, gr)
+				}
+			}
+		}
+	}
+	drawGrid()
 	if len(lines) == 0 {
 		return img
 	}
@@ -1135,26 +1184,14 @@ func (a *AftografApp) plotRender(w, h int) image.Image {
 	if mxY-mnY < 1 {
 		mxY = mnY + 1
 	}
-	mg := 30.0
-	sx := (float64(wi) - 2*mg) / float64(mxX-mnX)
-	sy := (float64(hi) - 2*mg) / float64(mxY-mnY)
+	sx := (pageW - 2*mg) / float64(mxX-mnX)
+	sy := (pageH - 2*mg) / float64(mxY-mnY)
 	sc := sx
 	if sy < sc {
 		sc = sy
 	}
-	tx := func(x int) int { return int(mg + float64(x-mnX)*sc) }
-	ty := func(y int) int { return int(float64(hi) - mg - float64(y-mnY)*sc) }
-	gr := color.RGBA{210, 200, 180, 255}
-	for i := 0; i <= 10; i++ {
-		x := int(mg + (float64(wi)-2*mg)*float64(i)/10.0)
-		y := int(mg + (float64(hi)-2*mg)*float64(i)/10.0)
-		for yy := int(mg); yy < hi-int(mg); yy++ {
-			img.Set(x, yy, gr)
-		}
-		for xx := int(mg); xx < wi-int(mg); xx++ {
-			img.Set(xx, y, gr)
-		}
-	}
+	tx := func(x int) int { return int(pageX + mg + float64(x-mnX)*sc) }
+	ty := func(y int) int { return int(pageY + pageH - mg - float64(y-mnY)*sc) }
 	pens := []color.Color{color.RGBA{0, 0, 0, 255}, color.RGBA{204, 0, 0, 255}, color.RGBA{0, 85, 255, 255}, color.RGBA{0, 153, 0, 255}, color.RGBA{204, 170, 0, 255}, color.RGBA{136, 0, 204, 255}, color.RGBA{0, 153, 204, 255}}
 	for _, s := range lines {
 		drawLine(img, tx(s.X1), ty(s.Y1), tx(s.X2), ty(s.Y2), pens[s.Pen%len(pens)])
@@ -1382,7 +1419,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		dipRow.Add(a.dipLEDs[i])
 	}
 	regBox.Add(dipRow)
-	regCard := widget.NewCard("CPU", "", regBox)
+	regCard := smallCard("CPU", regBox)
 
 	// Stack
 	for i := range a.stackLbl {
@@ -1392,7 +1429,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	for _, l := range a.stackLbl {
 		stackCol.Add(l)
 	}
-	stackCard := widget.NewCard("Stack", "", container.NewVScroll(stackCol))
+	stackCard := smallCard("Stack", container.NewVScroll(stackCol))
 	// USART
 	uE := widget.NewEntry()
 	uE.SetPlaceHolder("hex (01 02 FF)")
@@ -1443,7 +1480,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		}
 		uStatus.SetText(fmt.Sprintf("TX:%s RX:%s", txS, rxS))
 	})
-	usartB := widget.NewCard("USART", "",
+	usartB := smallCard("USART",
 		container.New(layout.NewVBoxLayout(),
 			container.NewHBox(uE, sendBtn),
 			uStatus,
@@ -1453,17 +1490,16 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	// Breakpoints panel
 	a.bpLbl = container.NewVBox()
 	bpScroll := container.NewVScroll(a.bpLbl)
-	bpCard := widget.NewCard("Breakpoints", "", bpScroll)
+	bpCard := smallCard("Breakpoints", bpScroll)
 	a.refreshBreakpoints()
 	// PIO panel
 	a.pioLbl = container.NewVBox()
 	pioScroll := container.NewVScroll(a.pioLbl)
-	pioCard := widget.NewCard("I/O", "", pioScroll)
+	pioCard := smallCard("I/O", pioScroll)
 	a.refreshPIO()
+	debugPage := container.NewVScroll(container.NewVBox(regCard, stackCard, bpCard))
 	leftTabs := container.NewAppTabs(
-		container.NewTabItem("CPU", regCard),
-		container.NewTabItem("Stack", stackCard),
-		container.NewTabItem("BP", bpCard),
+		container.NewTabItem("Debug", debugPage),
 		container.NewTabItem("I/O", pioCard),
 		container.NewTabItem("USART", usartB),
 	)
@@ -1609,7 +1645,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		a.memJump(addr)
 		a.refreshDisasm()
 	}
-	dsCard := widget.NewCard("Disassembler", "", container.NewBorder(dsNav, nil, nil, nil, a.disasmList))
+	dsCard := smallCard("Disassembler", container.NewBorder(dsNav, nil, nil, nil, a.disasmList))
 
 	// CENTER: Memory
 	a.memEntry = widget.NewEntry()
@@ -1693,7 +1729,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	a.memList.OnSelected = func(id widget.ListItemID) {
 		a.memJump(uint16(id) * 16)
 	}
-	memCard := widget.NewCard("Memory", "", container.NewBorder(memNav, nil, nil, nil, a.memList))
+	memCard := smallCard("Memory", container.NewBorder(memNav, nil, nil, nil, a.memList))
 
 	center := container.NewVSplit(dsCard, memCard)
 	center.SetOffset(0.55)
@@ -1713,13 +1749,17 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	plotB := container.NewBorder(
 		container.NewVBox(container.NewHBox(a.xL, a.yL, a.penL), a.progBar, hpglR),
 		nil, nil, nil, a.plotRast)
-	plotCard := widget.NewCard("Plotter (A4)", "", plotB)
+	plotCard := smallCard("Plotter (A4)", plotB)
 
 	// ── MAIN SPLIT ──
 	cr := container.NewHSplit(center, plotCard)
-	cr.SetOffset(0.6)
+	// Give the plotter 48% of the center/right area (was 40%); the divider
+	// remains draggable for manual adjustment.
+	cr.SetOffset(0.52)
 	mainS := container.NewHSplit(leftSc, cr)
-	mainS.SetOffset(0.17)
+	// The left/debug area starts 20% narrower than before (14% vs 17%).
+	// HSplit keeps this divider user-adjustable.
+	mainS.SetOffset(0.14)
 	a.syncUI()
 	return container.NewBorder(tool, nil, nil, nil, mainS)
 }
