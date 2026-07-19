@@ -1429,7 +1429,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	for _, l := range a.stackLbl {
 		stackCol.Add(l)
 	}
-	stackCard := smallCard("Stack", container.NewVScroll(stackCol))
+	stackCard := smallCard("Stack", stackCol)
 	// USART
 	uE := widget.NewEntry()
 	uE.SetPlaceHolder("hex (01 02 FF)")
@@ -1489,8 +1489,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	)
 	// Breakpoints panel
 	a.bpLbl = container.NewVBox()
-	bpScroll := container.NewVScroll(a.bpLbl)
-	bpCard := smallCard("Breakpoints", bpScroll)
+	bpCard := smallCard("Breakpoints", a.bpLbl)
 	a.refreshBreakpoints()
 	// PIO panel
 	a.pioLbl = container.NewVBox()
@@ -1503,7 +1502,9 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		container.NewTabItem("I/O", pioCard),
 		container.NewTabItem("USART", usartB),
 	)
-	leftSc := container.NewVScroll(leftTabs)
+	// Each long tab owns its vertical scroll. Keeping an additional scroll
+	// around the tab widget would make wheel events compete with I/O/Debug.
+	leftPanel := fyne.CanvasObject(leftTabs)
 
 	// ── CENTER: Disassembler ──
 	a.dsEntry = widget.NewEntry()
@@ -1756,7 +1757,7 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	// Give the plotter 48% of the center/right area (was 40%); the divider
 	// remains draggable for manual adjustment.
 	cr.SetOffset(0.52)
-	mainS := container.NewHSplit(leftSc, cr)
+	mainS := container.NewHSplit(leftPanel, cr)
 	// The left/debug area starts 20% narrower than before (14% vs 17%).
 	// HSplit keeps this divider user-adjustable.
 	mainS.SetOffset(0.14)
