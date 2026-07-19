@@ -21,6 +21,12 @@ type PPI8255 struct {
 
 	// Control register (latched on last write to PortCtl).
 	ctl uint8
+
+	// inputProvider supplies external signals for input ports. Returning false
+	// leaves the normal latched register value visible. This keeps the PPI
+	// useful in isolation while allowing the simulator to model live hardware
+	// inputs such as a keyboard matrix and limit switches.
+	inputProvider func(port int) (uint8, bool)
 }
 
 // New creates a PPI8255 with all ports and control register reset to zero.
@@ -69,6 +75,11 @@ func (p *PPI8255) Write(port int, val uint8) {
 // Port 0-2 returns the respective data port; port 3 returns the control
 // register as written.
 func (p *PPI8255) Read(port int) uint8 {
+	if p.inputProvider != nil {
+		if value, ok := p.inputProvider(port); ok {
+			return value
+		}
+	}
 	switch port {
 	case PortA:
 		return p.A
@@ -81,6 +92,13 @@ func (p *PPI8255) Read(port int) uint8 {
 	default:
 		return 0
 	}
+}
+
+// SetInputProvider installs a callback for externally driven input signals.
+// The callback is queried on every read, so changes made while the CPU is
+// running become visible to the next IN/LDA access without a polling step.
+func (p *PPI8255) SetInputProvider(provider func(port int) (uint8, bool)) {
+	p.inputProvider = provider
 }
 
 // Reset clears all registers to zero.

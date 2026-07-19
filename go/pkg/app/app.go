@@ -283,11 +283,12 @@ type AftografApp struct {
 	HPGL       *hpgl.HPGL
 	Setts      *settings.Settings
 
-	Running   bool
-	RomLoaded bool
-	mu        sync.Mutex
-	mainWin   fyne.Window
-	speedIdx  int
+	Running    bool
+	RomLoaded  bool
+	mu         sync.Mutex
+	hardwareMu sync.RWMutex
+	mainWin    fyne.Window
+	speedIdx   int
 
 	pcCheck *widget.Check
 	// Registers: display + editable entries
@@ -297,6 +298,11 @@ type AftografApp struct {
 	regBCb, regDEb, regHLb, regSPb *widget.Button
 	flagBtns                       [5]*widget.Button
 	dipLEDs                        []*canvas.Circle
+	pIOLEDs                        [4]*canvas.Circle
+	keyboardChecks                 [6][2]*widget.Check
+	limitChecks                    [4]*widget.Check
+	dipChecks                      [4]*widget.Check
+	hardwareStatus                 *widget.Label
 	statusL                        *widget.Label
 	stackLbl                       [24]*debugLabel
 
@@ -333,6 +339,70 @@ type AftografApp struct {
 	hpglStep     int
 	hpglMode     bool
 	pitRemainder uint64
+
+	// External hardware state. These inputs are deliberately kept separate
+	// from PPI latches: the CPU can change the PPI configuration while the
+	// operator changes switches and keys live during Run.
+	keyboard [6][2]bool
+	limits   [4]bool // Xmin, Xmax, Ymin, Ymax -> PPI1.B bits 0..3
+	dip      [4]bool // DIP1..4 -> PPI1.B bits 4..7
+}
+
+// keyboardRowsForColumn models the real PPI1 scan: PPI1.C selects one of two
+// columns and PPI1.A returns the six row bits.
+func keyboardRowsForColumn(column uint8, keys [6][2]bool) uint8 {
+	column &= 0x03
+	if column == 0 {
+		return 0
+	}
+	col := 0
+	if column&0x01 == 0 {
+		col = 1
+	}
+	var rows uint8
+	for row := 0; row < len(keys); row++ {
+		if keys[row][col] {
+			rows |= 1 << uint(row)
+		}
+	}
+	return rows
+}
+
+// keyboardColumnsForRow preserves the scan convention used by the existing
+// Rust implementation: PPI2.A selects one of six rows and PPI2.B returns the
+// two column bits.
+func keyboardColumnsForRow(rowSelect uint8, keys [6][2]bool) uint8 {
+	rowSelect &= 0x3f
+	if rowSelect == 0 {
+		return 0
+	}
+	row := 0
+	for i := 0; i < len(keys); i++ {
+		if rowSelect&(1<<uint(i)) != 0 {
+			row = i
+			break
+		}
+	}
+	var columns uint8
+	for col := 0; col < 2; col++ {
+		if keys[row][col] {
+			columns |= 1 << uint(col)
+		}
+	}
+	return columns
+}
+
+func sensorInputByte(limits, dip [4]bool) uint8 {
+	var value uint8
+	for i := 0; i < 4; i++ {
+		if limits[i] {
+			value |= 1 << uint(i)
+		}
+		if dip[i] {
+			value |= 1 << uint(i+4)
+		}
+	}
+	return value
 }
 
 func New() *AftografApp {
@@ -344,6 +414,37 @@ func New() *AftografApp {
 		breakpoints: make(map[uint16]bool),
 	}
 	app.PPI1, app.PPI2 = ppi8255.New(), ppi8255.New()
+	app.PPI1.SetInputProvider(func(port int) (uint8, bool) {
+		app.hardwareMu.RLock()
+		keys, limits, dip := app.keyboard, app.limits, app.dip
+		app.hardwareMu.RUnlock()
+		switch port {
+		case ppi8255.PortA:
+			if app.PPI1.Control()&0x10 == 0 {
+				return 0, false
+			}
+			return keyboardRowsForColumn(app.PPI1.PortC(), keys), true
+		case ppi8255.PortB:
+			if app.PPI1.Control()&0x02 == 0 {
+				return 0, false
+			}
+			return sensorInputByte(limits, dip), true
+		default:
+			return 0, false
+		}
+	})
+	// The Rust simulator historically exposed the matrix through PPI2.A/B.
+	// Keep this compatibility path live as well; it is harmless for firmware
+	// using the documented PPI1 wiring.
+	app.PPI2.SetInputProvider(func(port int) (uint8, bool) {
+		if port != ppi8255.PortB {
+			return 0, false
+		}
+		app.hardwareMu.RLock()
+		keys := app.keyboard
+		app.hardwareMu.RUnlock()
+		return keyboardColumnsForRow(app.PPI2.PortA(), keys), true
+	})
 	app.PIT, app.USART = pit8253.New(), usart8251.New()
 	app.Plot, app.HPGL = plotter.New(), hpgl.New()
 	app.Setts = settings.Default()
@@ -581,15 +682,28 @@ func (a *AftografApp) syncUI() {
 	// checkbox callback synchronously, and that callback also uses a.mu.
 	// The checkbox is changed by the user; its state is therefore not pushed
 	// back during a state refresh.
-	// DIP LEDs
-	for i := 0; i < 8; i++ {
-		on := a.PPI1.A&(1<<uint(i)) != 0
+	// Physical LEDs are PPI1.PC2..PC5.
+	for i := 0; i < len(a.dipLEDs); i++ {
+		on := a.PPI1.PortC()&(1<<uint(i+2)) != 0
 		a.dipLEDs[i].FillColor = color.RGBA{0, 200, 0, 255}
 		if !on {
 			a.dipLEDs[i].FillColor = color.RGBA{40, 40, 40, 255}
 		}
 		a.dipLEDs[i].Refresh()
 	}
+	// PPI1.PC2..PC5 are the four physical plotter LEDs. They are outputs,
+	// unlike the live DIP/limit inputs displayed below.
+	for i := 0; i < len(a.pIOLEDs); i++ {
+		if a.pIOLEDs[i] == nil {
+			continue
+		}
+		a.pIOLEDs[i].FillColor = color.RGBA{40, 40, 40, 255}
+		if a.PPI1.PortC()&(1<<uint(i+2)) != 0 {
+			a.pIOLEDs[i].FillColor = color.RGBA{0, 200, 0, 255}
+		}
+		a.pIOLEDs[i].Refresh()
+	}
+	a.refreshHardwareStatus()
 	// Progress bar
 	if a.progBar != nil && a.HPGL != nil && len(a.HPGL.Segments) > 0 {
 		a.progBar.SetValue(float64(a.hpglStep) / float64(len(a.HPGL.Segments)))
@@ -994,10 +1108,35 @@ func (a *AftografApp) refreshPIO() {
 	addRow("USART.MODE", "EC00", fmt.Sprintf("%s (%02X)", bin(u.Mode()), u.Mode()), "mode register")
 	// ── External ──
 	addSection("── EXTERNAL ──")
-	addRow("DIP LEDs", "E000", bin(p1.PortA()), "PPI1.A output")
-	addRow("Keyboard", "—", "—", "2×6 (TODO)")
-	addRow("Pen sensors", "—", "—", "TODO")
-	addRow("Pen magazine", "—", "—", "TODO")
+	addRow("Plotter LEDs", "E002", bin(p1.PortC()), "PPI1.C bits PC2..PC5")
+	keys, limits, dip := a.hardwareSnapshot()
+	addRow("Keyboard", "E000/E002", fmt.Sprintf("%02X/%02X", keyboardRowsForColumn(p1.PortC(), keys), p1.PortC()&0x03), "6×2 live matrix: rows/columns")
+	addRow("Sensors", "E001", fmt.Sprintf("%02X", sensorInputByte(limits, dip)), "PB0..3 limits, PB4..7 DIP")
+	addRow("Pen sensors", "—", "auto", fmt.Sprintf("up:%s down:%s", boolMark(!a.Plot.PenDown), boolMark(a.Plot.PenDown)))
+	addRow("Pen magazine", "—", fmt.Sprintf("%d", a.Plot.PenNum), "selected pen")
+}
+
+func boolMark(value bool) string {
+	if value {
+		return "ON"
+	}
+	return "off"
+}
+
+func (a *AftografApp) hardwareSnapshot() ([6][2]bool, [4]bool, [4]bool) {
+	a.hardwareMu.RLock()
+	defer a.hardwareMu.RUnlock()
+	return a.keyboard, a.limits, a.dip
+}
+
+func (a *AftografApp) refreshHardwareStatus() {
+	if a.hardwareStatus == nil {
+		return
+	}
+	keys, limits, dip := a.hardwareSnapshot()
+	rows := keyboardRowsForColumn(a.PPI1.PortC(), keys)
+	sensors := sensorInputByte(limits, dip)
+	a.hardwareStatus.SetText(fmt.Sprintf("LIVE inputs  PPI1.A rows:%02X  PPI1.B sensors:%02X  PPI1.C scan:%02X", rows, sensors, a.PPI1.PortC()&0x03))
 }
 func b2i(b bool) int {
 	if b {
@@ -1410,10 +1549,10 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 		flagRow.Add(a.flagBtns[i])
 	}
 	regBox.Add(flagRow)
-	// Row 8: DIP LEDs (D7-D0)
-	a.dipLEDs = make([]*canvas.Circle, 8)
-	dipRow := container.New(&compactHBox{}, monoLabel("D7-D0:"))
-	for i := 7; i >= 0; i-- {
+	// Row 8: physical plotter LEDs (PPI1.PC2..PC5)
+	a.dipLEDs = make([]*canvas.Circle, 4)
+	dipRow := container.New(&compactHBox{}, monoLabel("LED PC5-PC2:"))
+	for i := 0; i < len(a.dipLEDs); i++ {
 		a.dipLEDs[i] = canvas.NewCircle(color.RGBA{40, 40, 40, 255})
 		a.dipLEDs[i].Resize(fyne.NewSize(7, 7))
 		dipRow.Add(a.dipLEDs[i])
@@ -1496,10 +1635,80 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	pioScroll := container.NewVScroll(a.pioLbl)
 	pioCard := smallCard("I/O", pioScroll)
 	a.refreshPIO()
+
+	// ── LIVE HARDWARE ──
+	// These controls intentionally live on their own tab: they remain usable
+	// while the CPU is running and do not get buried in the long I/O dump.
+	a.hardwareStatus = monoLabel("LIVE inputs")
+	keyboardGrid := container.NewGridWithColumns(3)
+	keyboardGrid.Add(monoLabel("Row"))
+	keyboardGrid.Add(monoLabel("Col 0"))
+	keyboardGrid.Add(monoLabel("Col 1"))
+	for row := 0; row < 6; row++ {
+		keyboardGrid.Add(monoLabel(fmt.Sprintf("R%d", row)))
+		for col := 0; col < 2; col++ {
+			r, c := row, col
+			a.keyboardChecks[r][c] = widget.NewCheck("pressed", func(pressed bool) {
+				a.hardwareMu.Lock()
+				a.keyboard[r][c] = pressed
+				a.hardwareMu.Unlock()
+				a.syncUI()
+			})
+			keyboardGrid.Add(a.keyboardChecks[r][c])
+		}
+	}
+	keyboardHint := monoLabel("Клик по ячейке меняет состояние; чтение идёт на каждом обращении CPU к PPI.")
+	keyboardCard := smallCard("Keyboard 6×2", container.NewVBox(keyboardHint, keyboardGrid))
+
+	limitBox := container.NewHBox()
+	for i, name := range []string{"X−", "X+", "Y−", "Y+"} {
+		idx := i
+		a.limitChecks[i] = widget.NewCheck(name, func(checked bool) {
+			a.hardwareMu.Lock()
+			a.limits[idx] = checked
+			a.hardwareMu.Unlock()
+			a.syncUI()
+		})
+		limitBox.Add(a.limitChecks[i])
+	}
+	dipBox := container.NewHBox()
+	for i := 0; i < 4; i++ {
+		idx := i
+		a.dipChecks[i] = widget.NewCheck(fmt.Sprintf("DIP%d", i+1), func(checked bool) {
+			a.hardwareMu.Lock()
+			a.dip[idx] = checked
+			a.hardwareMu.Unlock()
+			a.syncUI()
+		})
+		dipBox.Add(a.dipChecks[i])
+	}
+	ledBox := container.NewHBox(monoLabel("LED PC2..PC5:"))
+	for i := 0; i < len(a.pIOLEDs); i++ {
+		a.pIOLEDs[i] = canvas.NewCircle(color.RGBA{40, 40, 40, 255})
+		a.pIOLEDs[i].Resize(fyne.NewSize(10, 10))
+		ledBox.Add(a.pIOLEDs[i])
+	}
+	sensorCard := smallCard("Sensors and LEDs", container.NewVBox(
+		monoLabel("Limit switches (PPI1.B bits 0..3)"),
+		limitBox,
+		monoLabel("DIP switches (PPI1.B bits 4..7)"),
+		dipBox,
+		ledBox,
+		monoLabel("Pen sensors are shown live from the plotter state; axis/DIP inputs above are operator-controlled."),
+	))
+	hardwarePage := container.NewVScroll(container.NewVBox(
+		smallCard("Hardware simulation", container.NewVBox(
+			a.hardwareStatus,
+			monoLabel("Inputs are sampled live during Run; no pause is required."),
+		)),
+		keyboardCard,
+		sensorCard,
+	))
 	debugPage := container.NewVScroll(container.NewVBox(regCard, stackCard, bpCard))
 	leftTabs := container.NewAppTabs(
 		container.NewTabItem("Debug", debugPage),
 		container.NewTabItem("I/O", pioCard),
+		container.NewTabItem("Hardware", hardwarePage),
 		container.NewTabItem("USART", usartB),
 	)
 	// Each long tab owns its vertical scroll. Keeping an additional scroll

@@ -29,6 +29,31 @@ func TestUSARTReceiveRaisesCPUInterrupt(t *testing.T) {
 	}
 }
 
+func TestLiveKeyboardAndSensorInputs(t *testing.T) {
+	a := New()
+	a.hardwareMu.Lock()
+	a.keyboard[2][1] = true
+	a.limits[0] = true
+	a.dip[3] = true
+	a.hardwareMu.Unlock()
+
+	// PPI1.C bit 1 selects column 1; PPI1.A returns the six row bits.
+	a.PPI1.Write(3, 0x92) // PPI1.A/B input, PPI1.C output
+	a.PPI1.Write(2, 0x02)
+	if got := a.PPI1.Read(0); got != 0x04 {
+		t.Fatalf("PPI1 keyboard rows=%02X, want 04", got)
+	}
+	if got := a.PPI1.Read(1); got != 0x81 {
+		t.Fatalf("PPI1 sensor byte=%02X, want 81", got)
+	}
+
+	// Compatibility scan used by the Rust implementation: PPI2.A selects row 2.
+	a.PPI2.Write(0, 0x04)
+	if got := a.PPI2.Read(1); got != 0x02 {
+		t.Fatalf("PPI2 keyboard columns=%02X, want 02", got)
+	}
+}
+
 func TestRunStopsAtHLTWithoutGUI(t *testing.T) {
 	a := New()
 	a.MMU.Poke(0x0000, 0x00) // NOP

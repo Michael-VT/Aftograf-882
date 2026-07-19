@@ -20,3 +20,20 @@ func TestModeAEncoding(t *testing.T) {
 		}
 	}
 }
+
+func TestInputProviderOverridesLatchedPort(t *testing.T) {
+	p := New()
+	p.Write(PortB, 0x12)
+	p.SetInputProvider(func(port int) (uint8, bool) {
+		if port == PortB {
+			return 0xA5, true
+		}
+		return 0, false
+	})
+	if got := p.Read(PortB); got != 0xA5 {
+		t.Fatalf("input provider returned %02X, want A5", got)
+	}
+	if got := p.Read(PortA); got != 0 {
+		t.Fatalf("unhandled port changed read value to %02X", got)
+	}
+}
