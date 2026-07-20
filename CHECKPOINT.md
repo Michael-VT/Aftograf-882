@@ -1,7 +1,7 @@
 # Autograf-882 — Checkpoint
 
 **Date:** 2026-07-20
-**State:** STABLE — Go v1.0.18, Rust v1.0.11
+**State:** STABLE — Go v1.0.18, Rust v1.0.11, JavaScript v0.0.7
 
 ## Versions
 

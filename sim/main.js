@@ -2334,29 +2334,22 @@ class App {
             const pt = coords[idx];
             const sx = Math.round(pt.x * scale + ox);
             const sy = Math.round(pt.y * scale + oy);
+            const prev = idx > 0 ? coords[idx - 1] : pt;
+            const px = Math.round(prev.x * scale + ox);
+            const py = Math.round(prev.y * scale + oy);
             this.plotter.xPos = sx;
             this.plotter.yPos = sy;
             this.plotter.x = sx;
             this.plotter.y = sy;
             if (pt.cmd === 'PD') {
               this.plotter.penDown = true;
-              if (this.plotter.currentSegment) {
-                this.plotter.currentSegment.x2 = sx;
-                this.plotter.currentSegment.y2 = sy;
-              } else {
-                const prev = idx > 0 ? coords[idx-1] : pt;
-                const px = Math.round(prev.x * scale + ox);
-                const py = Math.round(prev.y * scale + oy);
-                this.plotter.currentSegment = { x1: px, y1: py, pen: pt.pen };
-                this.plotter.currentSegment.x2 = sx;
-                this.plotter.currentSegment.y2 = sy;
+              // Keep every pen movement. Collapsing a PD/PA run into one
+              // segment loses all intermediate vertices of the polyline.
+              if (px !== sx || py !== sy) {
+                this.plotter.lines.push({ x1: px, y1: py, x2: sx, y2: sy, pen: pt.pen });
               }
             } else {
               this.plotter.penDown = false;
-              if (this.plotter.currentSegment) {
-                this.plotter.lines.push(this.plotter.currentSegment);
-                this.plotter.currentSegment = null;
-              }
             }
             this.mmu.poke(hpglAddr('X_POS_LO'), sx & 0xff);
             this.mmu.poke(hpglAddr('X_POS_HI'), (sx >> 8) & 0xff);
@@ -2364,13 +2357,6 @@ class App {
             this.mmu.poke(hpglAddr('Y_POS_HI'), (sy >> 8) & 0xff);
             this.mmu.poke(hpglAddr('PEN_STATE'), pt.cmd === 'PD' ? 0x01 : 0x00);
             this.mmu.poke(hpglAddr('PEN_COLOR'), pt.pen);
-            if (pt.cmd === 'PD' && this.plotter.currentSegment) {
-              const next = coords[idx + 1];
-              if (!next || next.cmd === 'PU') {
-                this.plotter.lines.push(this.plotter.currentSegment);
-                this.plotter.currentSegment = null;
-              }
-            }
             // Batch renders for performance
             const doRender = (idx % 16 === 0) || (idx === coords.length - 1) || idx < 4;
             if (doRender) {

@@ -46,32 +46,24 @@ function buildSegments(coordinates) {
   const segments = [];
   let x = 0;
   let y = 0;
-  let down = false;
-  let current = null;
 
   for (const point of coordinates) {
     if (point.cmd === 'PU') {
-      if (current) segments.push(current);
-      current = null;
-      down = false;
       x = point.x;
       y = point.y;
       continue;
     }
 
     if (point.cmd !== 'PD') continue;
-    if (!down || !current || current.pen !== point.pen) {
-      if (current) segments.push(current);
-      current = { x1: x, y1: y, x2: point.x, y2: point.y, pen: point.pen };
-    } else {
-      current.x2 = point.x;
-      current.y2 = point.y;
+    // HPGL is a polyline language: every coordinate under PD is a
+    // separate vector from the previous coordinate. Do not collapse a
+    // complete PD/PA run into one diagonal segment.
+    if (x !== point.x || y !== point.y) {
+      segments.push({ x1: x, y1: y, x2: point.x, y2: point.y, pen: point.pen });
     }
-    down = true;
     x = point.x;
     y = point.y;
   }
-  if (current) segments.push(current);
   return segments;
 }
 

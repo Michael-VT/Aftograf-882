@@ -37,7 +37,7 @@
 - Optional stop on peripheral access with READ/WRITE, device, register and value details
 - GUI framework: Fyne v2.5.3
 
-### Browser (sim/) — Legacy
+### Browser (sim/) — Legacy, v0.0.7
 - JavaScript-based legacy debugger
 - Node HPGL regression tests for absolute/relative coordinates and common plotter command forms
 - Full 8080 CPU + memory + plotter + disassembler

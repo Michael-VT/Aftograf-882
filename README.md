@@ -129,6 +129,8 @@ go vet ./...
 
 The legacy browser-based version:
 
+Current browser build: `v0.0.7`.
+
 ```bash
 cd sim && ./tryjs.sh
 # Or manually:
