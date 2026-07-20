@@ -84,7 +84,7 @@ A legacy browser-based version (`sim/`) is also available.
 ### Sensors & Diagnostics
 - CPU register panel with cycle counter (Rust & Go)
 - Stack display (8 words in Go, configurable)
-- Plotter LEDs on PPI1.C bits PC2–PC5 (Go)
+- Plotter LEDs on PPI1.C2–C5 (Go)
 - Keyboard matrix and X/Y limit/DIP input simulation (Go; Rust and JavaScript have their own input controls)
 - Session save/load to JSON file (Go)
 - Keyboard shortcuts: Space/→ Step, R Reset, F5 Run/Pause, B breakpoint, ? Help
@@ -120,7 +120,7 @@ Tests:
 
 ```bash
 cd go
-go test ./...
+go test -count=1 ./...
 go test -race ./pkg/app
 go vet ./...
 ```

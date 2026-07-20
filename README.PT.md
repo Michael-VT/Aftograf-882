@@ -115,6 +115,8 @@ go vet ./...
 
 `sim/` — versão antiga para navegador:
 
+Versão atual do navegador: `v0.0.7`.
+
 ```bash
 cd sim && ./tryjs.sh
 # Ou manualmente:

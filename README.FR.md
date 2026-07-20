@@ -106,7 +106,7 @@ Tests :
 
 ```bash
 cd go
-go test ./...
+go test -count=1 ./...
 go test -race ./pkg/app
 go vet ./...
 ```
@@ -114,6 +114,8 @@ go vet ./...
 ### Version navigateur
 
 `sim/` — ancienne version pour navigateur :
+
+Version actuelle du navigateur : `v0.0.7`.
 
 ```bash
 cd sim && ./tryjs.sh

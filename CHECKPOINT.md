@@ -8,7 +8,7 @@
 | Implementation | Version | Status |
 |---------------|---------|--------|
 | Rust (`rust/`) | v1.0.11 | STABLE — all bugs fixed, 37/37 tests |
-| Go (`go/`) | v1.0.18 | STABLE — `go test ./...`, race test and vet pass |
+| Go (`go/`) | v1.0.18 | STABLE — `go test -count=1 ./...`, race test and vet pass |
 
 ## Project Structure
 

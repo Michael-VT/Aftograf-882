@@ -106,7 +106,7 @@ cd go
 
 ```bash
 cd go
-go test ./...
+go test -count=1 ./...
 go test -race ./pkg/app
 go vet ./...
 ```
@@ -114,6 +114,8 @@ go vet ./...
 ### Браузерна версія
 
 `sim/` — стара версія для браузера:
+
+Поточна браузерна збірка: `v0.0.7`.
 
 ```bash
 cd sim && ./tryjs.sh
