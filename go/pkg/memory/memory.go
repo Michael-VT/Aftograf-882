@@ -47,6 +47,24 @@ type IODevice interface {
 	Write(port int, val uint8)
 }
 
+// AccessKind identifies the direction of a memory-mapped peripheral access.
+type AccessKind uint8
+
+const (
+	AccessRead AccessKind = iota
+	AccessWrite
+)
+
+// AccessEvent describes one access to the mapped peripheral address space.
+// It is deliberately emitted by MMU, rather than by individual devices, so
+// the debugger can stop on PPI, PIT and USART accesses uniformly.
+type AccessEvent struct {
+	Addr  uint16
+	Port  int
+	Kind  AccessKind
+	Value uint8
+}
+
 // MMU manages the system memory map.
 type MMU struct {
 	memory [MemorySize]byte
@@ -59,6 +77,8 @@ type MMU struct {
 	LastWriteAddr uint16
 	// OnInvalidWrite, if set, is called when a write targets ROM.
 	OnInvalidWrite func(addr uint16, val uint8)
+	// OnAccess, if set, receives every mapped peripheral read or write.
+	OnAccess func(AccessEvent)
 }
 
 // New creates an MMU with the given I/O devices. Devices may be nil.
@@ -104,21 +124,33 @@ func (m *MMU) Read(addr uint16) uint8 {
 	case addr >= RamStart && addr <= RamEnd:
 		return m.memory[addr]
 	case addr >= PPI1Base && addr <= PPI1End:
+		value := uint8(0xFF)
 		if m.ppi1 != nil {
-			return m.ppi1.Read(int(addr & 3))
+			value = m.ppi1.Read(int(addr & 3))
 		}
+		m.notifyAccess(AccessEvent{Addr: addr, Port: int(addr & 3), Kind: AccessRead, Value: value})
+		return value
 	case addr >= PPI2Base && addr <= PPI2End:
+		value := uint8(0xFF)
 		if m.ppi2 != nil {
-			return m.ppi2.Read(int(addr & 3))
+			value = m.ppi2.Read(int(addr & 3))
 		}
+		m.notifyAccess(AccessEvent{Addr: addr, Port: int(addr & 3), Kind: AccessRead, Value: value})
+		return value
 	case addr >= PITBase && addr <= PITEnd:
+		value := uint8(0xFF)
 		if m.pit != nil {
-			return m.pit.Read(int(addr & 3))
+			value = m.pit.Read(int(addr & 3))
 		}
+		m.notifyAccess(AccessEvent{Addr: addr, Port: int(addr & 3), Kind: AccessRead, Value: value})
+		return value
 	case addr >= UARTBase && addr <= UARTEnd:
+		value := uint8(0xFF)
 		if m.uart != nil {
-			return m.uart.Read(int(addr & 1))
+			value = m.uart.Read(int(addr & 1))
 		}
+		m.notifyAccess(AccessEvent{Addr: addr, Port: int(addr & 1), Kind: AccessRead, Value: value})
+		return value
 	}
 	return 0xFF
 }
@@ -140,18 +172,28 @@ func (m *MMU) Write(addr uint16, val uint8) {
 		if m.ppi1 != nil {
 			m.ppi1.Write(int(addr&3), val)
 		}
+		m.notifyAccess(AccessEvent{Addr: addr, Port: int(addr & 3), Kind: AccessWrite, Value: val})
 	case addr >= PPI2Base && addr <= PPI2End:
 		if m.ppi2 != nil {
 			m.ppi2.Write(int(addr&3), val)
 		}
+		m.notifyAccess(AccessEvent{Addr: addr, Port: int(addr & 3), Kind: AccessWrite, Value: val})
 	case addr >= PITBase && addr <= PITEnd:
 		if m.pit != nil {
 			m.pit.Write(int(addr&3), val)
 		}
+		m.notifyAccess(AccessEvent{Addr: addr, Port: int(addr & 3), Kind: AccessWrite, Value: val})
 	case addr >= UARTBase && addr <= UARTEnd:
 		if m.uart != nil {
 			m.uart.Write(int(addr&1), val)
 		}
+		m.notifyAccess(AccessEvent{Addr: addr, Port: int(addr & 1), Kind: AccessWrite, Value: val})
+	}
+}
+
+func (m *MMU) notifyAccess(event AccessEvent) {
+	if m.OnAccess != nil {
+		m.OnAccess(event)
 	}
 }
 

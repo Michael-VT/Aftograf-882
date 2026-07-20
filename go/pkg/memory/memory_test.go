@@ -170,6 +170,27 @@ func TestPPI2IO(t *testing.T) {
 	}
 }
 
+func TestPeripheralAccessCallback(t *testing.T) {
+	ppi := &mockIODevice{}
+	mmu := New(ppi, nil, nil, nil)
+	var events []AccessEvent
+	mmu.OnAccess = func(event AccessEvent) { events = append(events, event) }
+
+	mmu.Write(0xE003, 0x92)
+	if got := mmu.Read(0xE001); got != 0 {
+		t.Fatalf("PPI read returned %02X, want 00", got)
+	}
+	if len(events) != 2 {
+		t.Fatalf("access callback count=%d, want 2", len(events))
+	}
+	if events[0].Kind != AccessWrite || events[0].Addr != 0xE003 || events[0].Value != 0x92 {
+		t.Fatalf("write event=%+v", events[0])
+	}
+	if events[1].Kind != AccessRead || events[1].Addr != 0xE001 {
+		t.Fatalf("read event=%+v", events[1])
+	}
+}
+
 func TestPITIO(t *testing.T) {
 	pit := &mockIODevice{}
 	mmu := New(nil, nil, pit, nil)

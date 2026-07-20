@@ -300,6 +300,7 @@ type AftografApp struct {
 	RomLoaded  bool
 	mu         sync.Mutex
 	hardwareMu sync.RWMutex
+	ioMu       sync.Mutex
 	mainWin    fyne.Window
 	speedIdx   int
 
@@ -316,6 +317,8 @@ type AftografApp struct {
 	limitChecks                    [4]*widget.Check
 	dipChecks                      [4]*widget.Check
 	hardwareStatus                 *widget.Label
+	ioBreakCheck                   *widget.Check
+	ioEventLabel                   *debugLabel
 	statusL                        *widget.Label
 	stackLbl                       [24]*debugLabel
 
@@ -359,6 +362,44 @@ type AftografApp struct {
 	keyboard [6][2]bool
 	limits   [4]bool // Xmin, Xmax, Ymin, Ymax -> PPI1.B bits 0..3
 	dip      [4]bool // DIP1..4 -> PPI1.B bits 4..7
+
+	peripheralBreak   bool
+	peripheralEvent   peripheralEvent
+	peripheralPending bool
+}
+
+type peripheralEvent struct {
+	valid    bool
+	addr     uint16
+	port     uint8
+	value    uint8
+	write    bool
+	name     string
+	detail   string
+	breakHit bool
+}
+
+func peripheralDescription(addr uint16, port int) (string, string) {
+	switch {
+	case addr >= memory.PPI1Base && addr <= memory.PPI1End:
+		details := []string{"PPI1.A: keyboard row inputs / output latch", "PPI1.B: limit switches and DIP inputs", "PPI1.C: keyboard column select and LEDs", "PPI1.CTL: port direction and mode"}
+		return "PPI1", details[port&3]
+	case addr >= memory.PPI2Base && addr <= memory.PPI2End:
+		details := []string{"PPI2.A: X stepper phase", "PPI2.B: executor/control signals", "PPI2.C: pen and timer control", "PPI2.CTL: port direction and mode"}
+		return "PPI2", details[port&3]
+	case addr >= memory.PITBase && addr <= memory.PITEnd:
+		if port < 3 {
+			return "PIT", fmt.Sprintf("counter %d: timer value", port)
+		}
+		return "PIT", "control: counter mode and access format"
+	case addr >= memory.UARTBase && addr <= memory.UARTEnd:
+		if port == 0 {
+			return "USART", "data register: transmit or receive byte"
+		}
+		return "USART", "status/command register"
+	default:
+		return "Peripheral", "mapped peripheral address"
+	}
 }
 
 // keyboardRowsForColumn models the real PPI1 scan: PPI1.C selects one of two
@@ -462,6 +503,18 @@ func New() *AftografApp {
 	app.Plot, app.HPGL = plotter.New(), hpgl.New()
 	app.Setts = settings.Default()
 	app.MMU = memory.New(app.PPI1, app.PPI2, app.PIT, app.USART)
+	app.MMU.OnAccess = func(event memory.AccessEvent) {
+		name, detail := peripheralDescription(event.Addr, event.Port)
+		app.recordPeripheralAccess(peripheralEvent{
+			valid:  true,
+			addr:   event.Addr,
+			port:   uint8(event.Port),
+			value:  event.Value,
+			write:  event.Kind == memory.AccessWrite,
+			name:   name,
+			detail: detail,
+		})
+	}
 	app.MMU.LoadDefaultFirmware()
 	app.RomLoaded = true
 	app.CPU = cpu.New(
@@ -485,9 +538,13 @@ func (a *AftografApp) inPort(p uint8) uint8 {
 	// memory-mapped EC00/EC01 registers.
 	switch p {
 	case 0x19:
-		return a.USART.Read(usart8251.DataPort)
+		value := a.USART.Read(usart8251.DataPort)
+		a.recordPeripheralAccess(peripheralEvent{valid: true, addr: 0x0019, port: p, value: value, name: "USART", detail: "direct port 19h: data register receive"})
+		return value
 	case 0x28:
-		return a.USART.Read(usart8251.CmdStatusPort)
+		value := a.USART.Read(usart8251.CmdStatusPort)
+		a.recordPeripheralAccess(peripheralEvent{valid: true, addr: 0x0028, port: p, value: value, name: "USART", detail: "direct port 28h: status register read"})
+		return value
 	}
 	return a.MMU.Read(0xE000 | uint16(p))
 }
@@ -495,12 +552,34 @@ func (a *AftografApp) outPort(p uint8, v uint8) {
 	switch p {
 	case 0x19:
 		a.USART.Write(usart8251.DataPort, v)
+		a.recordPeripheralAccess(peripheralEvent{valid: true, addr: 0x0019, port: p, value: v, write: true, name: "USART", detail: "direct port 19h: data register transmit"})
 		return
 	case 0x28:
 		a.USART.Write(usart8251.CmdStatusPort, v)
+		a.recordPeripheralAccess(peripheralEvent{valid: true, addr: 0x0028, port: p, value: v, write: true, name: "USART", detail: "direct port 28h: command register write"})
 		return
 	}
 	a.MMU.Write(0xE000|uint16(p), v)
+}
+
+func (a *AftografApp) recordPeripheralAccess(event peripheralEvent) {
+	a.ioMu.Lock()
+	if a.peripheralBreak {
+		event.breakHit = true
+		a.peripheralPending = true
+	}
+	a.peripheralEvent = event
+	a.ioMu.Unlock()
+}
+
+func (a *AftografApp) consumePeripheralBreak() bool {
+	a.ioMu.Lock()
+	defer a.ioMu.Unlock()
+	if !a.peripheralPending {
+		return false
+	}
+	a.peripheralPending = false
+	return true
 }
 
 // ───── CPU control ─────
@@ -512,6 +591,10 @@ func (a *AftografApp) Step() {
 		return
 	}
 	a.stepLocked()
+	// A manual single-step always consumes the pending stop condition; the
+	// event remains visible in the I/O panel but must not stop the next Run
+	// before another peripheral access occurs.
+	a.consumePeripheralBreak()
 	a.mu.Unlock()
 	a.mu.Lock()
 	a.followPC = true
@@ -543,6 +626,10 @@ func (a *AftografApp) Run() {
 			}
 			for i := 0; i < n && a.Running && !a.CPU.Halt; i++ {
 				a.stepLocked()
+				if a.consumePeripheralBreak() {
+					a.Running = false
+					break
+				}
 				if a.breakpoints[a.CPU.PC] {
 					a.Running = false
 					break
@@ -620,6 +707,10 @@ func (a *AftografApp) Reset() {
 	a.HPGL = hpgl.New()
 	a.hpglStep = 0
 	a.hpglMode = false
+	a.ioMu.Lock()
+	a.peripheralEvent = peripheralEvent{}
+	a.peripheralPending = false
+	a.ioMu.Unlock()
 	a.mu.Unlock()
 	a.syncUI()
 	a.refreshPlotCanvas()
@@ -717,6 +808,7 @@ func (a *AftografApp) syncUI() {
 		a.pIOLEDs[i].Refresh()
 	}
 	a.refreshHardwareStatus()
+	a.refreshPeripheralEvent()
 	// Progress bar
 	if a.progBar != nil && a.HPGL != nil && len(a.HPGL.Segments) > 0 {
 		a.progBar.SetValue(float64(a.hpglStep) / float64(len(a.HPGL.Segments)))
@@ -1078,17 +1170,17 @@ func (a *AftografApp) refreshPIO() {
 	// ── PPI1 (0xE000) ──
 	addSection("── PPI1 ──")
 	p1 := a.PPI1
-	addRow("PPI1.A", "E000", fmt.Sprintf("%s (%02X)", bin(p1.PortA()), p1.PortA()), "port A")
-	addRow("PPI1.B", "E001", fmt.Sprintf("%s (%02X)", bin(p1.PortB()), p1.PortB()), "port B")
-	addRow("PPI1.C", "E002", fmt.Sprintf("%s (%02X)", bin(p1.PortC()), p1.PortC()), "port C")
-	addRow("PPI1.CTL", "E003", fmt.Sprintf("%s (%02X)", bin(p1.Control()), p1.Control()), fmt.Sprintf("mode A:%d B:%d", p1.ModeA(), p1.ModeB()))
+	addRow("PPI1.A", "E000", fmt.Sprintf("%s (%02X)", bin(p1.PortA()), p1.PortA()), "keyboard rows / latch")
+	addRow("PPI1.B", "E001", fmt.Sprintf("%s (%02X)", bin(p1.PortB()), p1.PortB()), "limits + DIP inputs")
+	addRow("PPI1.C", "E002", fmt.Sprintf("%s (%02X)", bin(p1.PortC()), p1.PortC()), "key select + LEDs")
+	addRow("PPI1.CTL", "E003", fmt.Sprintf("%s (%02X)", bin(p1.Control()), p1.Control()), fmt.Sprintf("directions, mode A:%d B:%d", p1.ModeA(), p1.ModeB()))
 	// ── PPI2 (0xE400) ──
 	addSection("── PPI2 ──")
 	p2 := a.PPI2
-	addRow("PPI2.A", "E400", fmt.Sprintf("%s (%02X)", bin(p2.PortA()), p2.PortA()), "port A")
-	addRow("PPI2.B", "E401", fmt.Sprintf("%s (%02X)", bin(p2.PortB()), p2.PortB()), "port B")
-	addRow("PPI2.C", "E402", fmt.Sprintf("%s (%02X)", bin(p2.PortC()), p2.PortC()), "port C")
-	addRow("PPI2.CTL", "E403", fmt.Sprintf("%s (%02X)", bin(p2.Control()), p2.Control()), fmt.Sprintf("mode A:%d B:%d", p2.ModeA(), p2.ModeB()))
+	addRow("PPI2.A", "E400", fmt.Sprintf("%s (%02X)", bin(p2.PortA()), p2.PortA()), "X stepper phase")
+	addRow("PPI2.B", "E401", fmt.Sprintf("%s (%02X)", bin(p2.PortB()), p2.PortB()), "executor/control")
+	addRow("PPI2.C", "E402", fmt.Sprintf("%s (%02X)", bin(p2.PortC()), p2.PortC()), "pen + timer control")
+	addRow("PPI2.CTL", "E403", fmt.Sprintf("%s (%02X)", bin(p2.Control()), p2.Control()), fmt.Sprintf("directions, mode A:%d B:%d", p2.ModeA(), p2.ModeB()))
 	// ── PIT (0xE800) ──
 	modes := []string{"0:IO", "1:OS", "2:Rate", "3:SqWv", "4:STB", "5:HC"}
 	accs := []string{"?", "LSB", "MSB", "16bit"}
@@ -1110,7 +1202,7 @@ func (a *AftografApp) refreshPIO() {
 	u := a.USART
 	s := u.Status()
 	addSection("── USART ──")
-	addRow("USART.DATA", "EC00", fmt.Sprintf("%02X", u.Data()), "data register")
+	addRow("USART.DATA", "EC00", fmt.Sprintf("%02X", u.Data()), "transmit / receive byte")
 	addRow("USART.STATUS", "EC01", fmt.Sprintf("%s (%02X)", bin(s), s), fmt.Sprintf("TXRDY:%d RXRDY:%d OVRN:%d FE:%d PE:%d",
 		b2i(s&usart8251.StatusTxReady != 0),
 		b2i(s&usart8251.StatusRxReady != 0),
@@ -1150,6 +1242,35 @@ func (a *AftografApp) refreshHardwareStatus() {
 	rows := keyboardRowsForColumn(a.PPI1.PortC(), keys)
 	sensors := sensorInputByte(limits, dip)
 	a.hardwareStatus.SetText(fmt.Sprintf("LIVE  A:%02X  B:%02X  Cscan:%02X", rows, sensors, a.PPI1.PortC()&0x03))
+}
+
+func (a *AftografApp) refreshPeripheralEvent() {
+	if a.ioEventLabel == nil {
+		return
+	}
+	a.ioMu.Lock()
+	event := a.peripheralEvent
+	breakEnabled := a.peripheralBreak
+	a.ioMu.Unlock()
+	if !event.valid {
+		a.ioEventLabel.SetText("No peripheral access yet")
+		return
+	}
+	direction := "READ"
+	if event.write {
+		direction = "WRITE"
+	}
+	location := fmt.Sprintf("$%04X", event.addr)
+	if event.addr < 0x100 {
+		location = fmt.Sprintf("port %02Xh", event.port)
+	}
+	suffix := ""
+	if event.breakHit {
+		suffix = "  • BREAK"
+	} else if breakEnabled {
+		suffix = "  • not selected"
+	}
+	a.ioEventLabel.SetText(fmt.Sprintf("%s %s=%02X  (%s; %s)%s", direction, location, event.value, event.name, event.detail, suffix))
 }
 func b2i(b bool) int {
 	if b {
@@ -1458,7 +1579,10 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 					"? : This help\n\n"+
 					"CPU: Click button to jump to address\n"+
 					"Disasm: Click row to jump, ● for BP\n"+
-					"Memory: Click row to jump",
+					"Memory: Click row to jump\n\n"+
+					"I/O: enable 'Stop on peripheral access' to pause after\n"+
+					"IN/OUT or memory-mapped PPI/PIT/USART access; use ?\n"+
+					"in the I/O tab for the address and register descriptions.",
 				a.mainWin)
 		}),
 	)
@@ -1646,7 +1770,27 @@ func (a *AftografApp) MakeWindow(w fyne.Window) fyne.CanvasObject {
 	// PIO panel
 	a.pioLbl = container.NewVBox()
 	pioScroll := container.NewVScroll(a.pioLbl)
-	pioCard := smallCard("I/O", pioScroll)
+	a.ioEventLabel = newCompactDebugLabel("No peripheral access yet", a.debugRowHeight)
+	a.ioBreakCheck = widget.NewCheck("Stop on peripheral access", func(enabled bool) {
+		a.ioMu.Lock()
+		a.peripheralBreak = enabled
+		if !enabled {
+			a.peripheralPending = false
+		}
+		a.ioMu.Unlock()
+		a.syncUI()
+	})
+	ioHelp := widget.NewButton("?", func() {
+		dialog.ShowInformation("Peripheral access help",
+			"When enabled, Run stops after the instruction that accessed a peripheral.\n\n"+
+				"PPI1  $E000-$E3FF — keyboard, limit/DIP inputs and LEDs\n"+"PPI2  $E400-$E7FF — stepper, executor and pen control\n"+"PIT   $E800-$EBFF — timer counters and control\n"+"USART $EC00-$EFFF — data, status, mode and command\n\n"+"The event line shows READ/WRITE, address or IN/OUT port, value,\n"+"device and the operation performed.", a.mainWin)
+	})
+	ioHelp.Importance = widget.LowImportance
+	ioControls := container.NewVBox(
+		container.NewHBox(a.ioBreakCheck, ioHelp),
+		a.ioEventLabel,
+	)
+	pioCard := smallCard("I/O", container.NewBorder(ioControls, nil, nil, nil, pioScroll))
 	a.refreshPIO()
 
 	// ── LIVE HARDWARE ──

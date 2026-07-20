@@ -74,6 +74,42 @@ func TestRunStopsAtHLTWithoutGUI(t *testing.T) {
 	t.Fatal("Run did not stop at HLT")
 }
 
+func TestRunStopsOnPeripheralAccess(t *testing.T) {
+	a := New()
+	// LDA $E000 — a memory-mapped PPI1 read, followed by NOP.
+	a.MMU.Poke(0x0000, 0x3A)
+	a.MMU.Poke(0x0001, 0x00)
+	a.MMU.Poke(0x0002, 0xE0)
+	a.MMU.Poke(0x0003, 0x00)
+	a.CPU.Reset()
+	a.speedIdx = 0
+	a.ioMu.Lock()
+	a.peripheralBreak = true
+	a.ioMu.Unlock()
+	a.Run()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		a.mu.Lock()
+		running, pc := a.Running, a.CPU.PC
+		a.mu.Unlock()
+		if !running {
+			a.ioMu.Lock()
+			event := a.peripheralEvent
+			a.ioMu.Unlock()
+			if event.addr != 0xE000 || !event.valid || !event.breakHit {
+				t.Fatalf("peripheral stop event=%+v", event)
+			}
+			if pc != 3 {
+				t.Fatalf("PC after peripheral access=%04X, want 0003", pc)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("Run did not stop on peripheral access")
+}
+
 func TestMakeWindowSmoke(t *testing.T) {
 	app := fyneTest.NewTempApp(t)
 	sim := New()
