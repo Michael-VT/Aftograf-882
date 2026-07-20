@@ -1,14 +1,17 @@
-# Session Handoff — 2026-07-17
+# Session Handoff — 2026-07-20
 
-## Current State: Go v1.0.18
+## Current State: stable Go v1.0.18 baseline
 
-All commits:
+Recent code commits:
 ```
+0f87cfd  Add peripheral access breakpoints and explanations
+696aa80  Shorten live hardware panel labels
+2e781a2  Keep debugger splitter compact with hardware tab
+84b5cc5  Add live keyboard and sensor simulation
+2af124c  Avoid nested debugger panel scrolling
+1a435e2  Refine debugger layout and preserve A4 plotter view
+12b09ac  Restore memory colors and improve I/O navigation
 19880e6  I/O tab with PPI/PIT/USART/external status
-90a79cf  memScroll offset 17, SP entry in HBox
-3ad0f55  Click to toggle BP, memory scroll to top
-c09f602  BP list panel, memory scroll fix
-6fc8e9b  Instruction-indexed disassembly, architecture rules
 ```
 
 ## Architecture (3-panel split)
@@ -31,10 +34,10 @@ c09f602  BP list panel, memory scroll fix
 
 | Tab | Contents |
 |-----|----------|
-| CPU | Registers A-F + entries, flags, DIP LEDs |
-| Stack | 24 stack words from SP |
-| BP | Breakpoint list: click to jump, ✕ to remove |
-| I/O | PPI1/PPI2 (ports + binary), PIT (3 counters), USART (status bits), External |
+| Debug | CPU registers/flags, stack and breakpoints on one page |
+| I/O | PPI1/PPI2 (ports + binary), PIT (3 counters), USART, external state and access breakpoint |
+| Hardware | Live 6×2 keyboard matrix, X/Y limit switches, DIP inputs and PPI1.C2–C5 LEDs |
+| USART | USART terminal and hexadecimal input |
 
 ## Key types & functions
 
@@ -59,12 +62,12 @@ memJump(ad)       → scrolls memory to ad (2-phase: top then target)
 ## UI layout (MakeWindow)
 
 - Toolbar: version + Rst/Stp/Run/Pause + status + speed + Save/Load/?
-- Left: AppTabs(CPU|Stack|BP|I/O) + USART send panel, scrollable
+- Left: AppTabs(Debug|I/O|Hardware|USART), scrollable
 - Center: VSplit(Disassembler card 55% / Memory card 45%)
 - Right: Plotter (A4) with HPGL controls
 - Offsets: left=0.17, center/right=0.6
 
-## CPU Layout (CPU tab)
+## CPU Layout (Debug tab)
 ```
 A:XX  | BC:XXXX        ← A entry + BC button
 B:[00]| C:[00]         ← hex entries, OnSubmitted
@@ -72,7 +75,7 @@ D:[00]| E:[00]
 HL:XXXX SP:[0000]      ← HL button + SP entry (HBox for proper width)
 PC:XXXX T:12345
 S Z AC P CY            ← clickable flag buttons
-D7-D0:●●●●●●●●        ← DIP LEDs from PPI1.A
+LED PC5-PC2:●●●●      ← physical plotter LEDs from PPI1.C2–C5
 ```
 
 ## Keyboard shortcuts
@@ -102,13 +105,17 @@ D7-D0:●●●●●●●●        ← DIP LEDs from PPI1.A
 PPI1/PPI2 (8255): 3 ports each, 3 modes, bit-set/reset on port C
 PIT (8253): 3×16-bit counters, 6 operating modes, BCD option
 USART (8251): TX/RX buffers, status (ready/error/overrun), TxPending/RxPending
-External: DIP LEDs from PPI1.A, keyboard/sensors/magazine (TODO)
+External: keyboard matrix, X/Y limit switches, DIP inputs and plotter LED state; controls are available in the Hardware tab.
+
+Enable `Stop on peripheral access` to stop after the current instruction reads or writes a mapped PPI/PIT/USART register or a direct USART port. The event line identifies READ/WRITE, address or port, value, device and register function; `?` opens the address-map help.
 
 ## Build & test
 
 ```bash
-cd go && go run ./cmd/aftograf
+cd go && ./trygo.sh
 cd go && go test -count=1 ./...
+cd go && go test -race ./pkg/app
+cd go && go vet ./...
 ```
 
 ## Pending items
@@ -122,7 +129,4 @@ cd go && go test -count=1 ./...
 7. Font table viewer ($5E00-$5FFF)
 8. Assembly export — reassemble modified ROM
 9. HPGL step-by-step with current command display
-10. Keyboard 2×6 matrix emulation
-11. Pen position sensors + pen magazine emulation
-12. UART HPGL file feed simulation
-
+10. UART HPGL file feed simulation

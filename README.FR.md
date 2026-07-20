@@ -1,4 +1,4 @@
-# Autograf-882 Debug Simulator v1.0.15
+# Autograf-882 Debug Simulator v1.0.18
 
 ![Autograf-882 — Appareil d'Origine](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
 *Le traceur original Autograf-882*
@@ -56,10 +56,24 @@
 - Journal de réception (20 dernières entrées)
 - Indicateurs TXRDY/RXRDY
 
+### Interface Go : matériel en direct et débogage E/S
+- L'onglet `Debug` regroupe CPU, pile et points d'arrêt
+- L'onglet `I/O` affiche PPI1/PPI2, PIT, USART et le matériel externe en colonnes
+- L'onglet `Hardware` contient une matrice clavier 6×2, quatre fins de course X/Y, quatre entrées DIP et les LED PPI1.C2–C5
+- Les touches, fins de course et DIP peuvent être modifiés pendant l'exécution du CPU
+- `Stop on peripheral access` arrête Go après une instruction utilisant PPI, PIT ou USART
+- La ligne d'événement indique `READ/WRITE`, l'adresse ou le port direct, la valeur, le périphérique et la fonction du registre
+- Le bouton `?` de l'onglet I/O explique la carte des adresses des périphériques
+
+![Go : CPU, désassembleur, mémoire et traceur A4](images/Autograf-882-Debugger_CPU_Go_Shattle.png)
+
+![Go : état E/S et événement périphérique](images/Autograf-882-Debugger_PIO_Go_Shattle.png)
+
 ### Diagnostics
 - Panneau CPU avec compteur de cycles
 - Pile (8 mots en Go)
-- LED DIP (port A du PPI1)
+- LED du traceur sur PPI1.C2–C5 (Go)
+- Simulation du clavier 6×2, des fins de course X/Y et des entrées DIP (Go)
 - Sauvegarde/chargement de session en JSON (Go)
 - Raccourcis clavier : Espace/→ pas, R réinitialisation, F5 marche/pause, B breakpoint, ? aide
 
@@ -83,16 +97,18 @@ cargo test -- --test-threads=1
 
 ```bash
 cd go
-go run ./cmd/aftograf
+./trygo.sh
 ```
 
-La version Go utilise Fyne v2.5 pour l'interface graphique. Nécessite un serveur d'affichage (X11/macOS/Wayland).
+`trygo.sh` compile l'interface, exécute les tests unitaires et le smoke-test GUI, puis démarre le simulateur. Pour un lancement direct : `go run ./cmd/aftograf`. La version Go utilise Fyne v2.5 et nécessite un serveur d'affichage (X11/macOS/Wayland).
 
 Tests :
 
 ```bash
 cd go
 go test ./...
+go test -race ./pkg/app
+go vet ./...
 ```
 
 ### Version navigateur
@@ -128,6 +144,8 @@ python3 -m http.server 8080
 | `F5` | Marche / Pause |
 | `B` | Breakpoint |
 | `?` | Aide |
+
+Dans l'onglet Go `I/O`, activez `Stop on peripheral access` pour arrêter après l'instruction qui lit ou écrit un périphérique. La description du dernier accès reste visible.
 
 ---
 

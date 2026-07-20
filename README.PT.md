@@ -1,4 +1,4 @@
-# Autograf-882 Debug Simulator v1.0.15
+# Autograf-882 Debug Simulator v1.0.18
 
 ![Autograf-882 — Dispositivo Original](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
 *O plotter Autograf-882 original*
@@ -56,10 +56,24 @@
 - Registro de recepção (últimas 20 entradas)
 - Indicadores TXRDY/RXRDY
 
+### GUI Go: hardware ao vivo e depuração de E/S
+- A aba `Debug` reúne CPU, pilha e breakpoints
+- A aba `I/O` mostra PPI1/PPI2, PIT, USART e hardware externo em colunas
+- A aba `Hardware` contém matriz de teclado 6×2, quatro fins de curso X/Y, quatro entradas DIP e LEDs PPI1.C2–C5
+- Teclas, fins de curso e DIP podem ser alterados durante a execução da CPU
+- `Stop on peripheral access` interrompe o Go depois de uma instrução que acesse PPI, PIT ou USART
+- A linha do evento mostra `READ/WRITE`, endereço ou porta direta, valor, dispositivo e função do registrador
+- O botão `?` na aba I/O explica o mapa de endereços dos periféricos
+
+![Go: CPU, disassembler, memória e plotter A4](images/Autograf-882-Debugger_CPU_Go_Shattle.png)
+
+![Go: estado de E/S e evento periférico](images/Autograf-882-Debugger_PIO_Go_Shattle.png)
+
 ### Diagnóstico
 - Painel da CPU com contador de ciclos
 - Pilha (8 palavras em Go)
-- LEDs DIP (porta A do PPI1)
+- LEDs do plotter em PPI1.C2–C5 (Go)
+- Simulação do teclado 6×2, fins de curso X/Y e entradas DIP (Go)
 - Salvar/carregar sessão em JSON (Go)
 - Atalhos de teclado: Espaço/→ passo, R reset, F5 executar/pausar, B breakpoint, ? ajuda
 
@@ -79,20 +93,22 @@ cd rust
 cargo test -- --test-threads=1
 ```
 
-### Go (em desenvolvimento ativo)
+### Go (baseline GUI estável)
 
 ```bash
 cd go
-go run ./cmd/aftograf
+./trygo.sh
 ```
 
-A versão Go usa Fyne v2.5 para GUI. Requer um servidor de exibição (X11/macOS/Wayland).
+`trygo.sh` compila o GUI, executa os unit-tests em modo verbose, mostra o resultado do smoke-test e inicia o simulador. Feche a janela para terminar o script. Para iniciar diretamente, use `go run ./cmd/aftograf`. A versão Go usa Fyne v2.5 e requer um servidor de exibição (X11/macOS/Wayland).
 
 Testes:
 
 ```bash
 cd go
-go test ./...
+go test -count=1 ./...
+go test -race ./pkg/app
+go vet ./...
 ```
 
 ### Versão para navegador
@@ -128,6 +144,8 @@ python3 -m http.server 8080
 | `F5` | Executar / Pausar |
 | `B` | Breakpoint |
 | `?` | Ajuda |
+
+Na aba Go `I/O`, ative `Stop on peripheral access` para parar depois da instrução que fizer uma leitura ou escrita de periférico. O último evento mostra a operação, o endereço ou porta, o valor, o dispositivo e a função do registrador.
 
 ---
 

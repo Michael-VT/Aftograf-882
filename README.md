@@ -10,7 +10,7 @@ This project provides a complete digital twin of the original hardware: CPU emul
 | Implementation | Framework | Status |
 |---------------|-----------|--------|
 | **Rust** (`rust/`) | egui/eframe | Primary, feature-complete |
-| **Go** (`go/`) | Fyne v2 | Near-feature-complete, actively developed |
+| **Go** (`go/`) | Fyne v2.5 | Stable GUI/debugger baseline, actively developed |
 
 A legacy browser-based version (`sim/`) is also available.
 
@@ -68,10 +68,24 @@ A legacy browser-based version (`sim/`) is also available.
 - Transmit log with last 20 entries displayed
 - TXRDY/RXRDY status indicators
 
+### Go GUI: live hardware and I/O debugging
+- `Debug` tab combines CPU registers, stack and breakpoints
+- `I/O` tab shows PPI1/PPI2, PIT, USART and external hardware in aligned columns
+- `Hardware` tab provides a live 6×2 keyboard matrix, four X/Y limit switches, four DIP inputs and PPI1.C2–C5 LED indicators
+- Keyboard, limit and DIP states can be changed while the CPU is running; the next peripheral read sees the new state
+- `Stop on peripheral access` pauses Go after an instruction accesses PPI, PIT or USART; the event line reports `READ/WRITE`, address or direct port, value, device and register function
+- The `?` button in the I/O tab documents the peripheral address map and operation meanings
+- Go debugger keeps the plotter canvas at A4 proportions and provides scrollable Debug, I/O, Hardware and USART tabs
+
+![Go debugger — CPU, disassembler, memory and A4 plotter](images/Autograf-882-Debugger_CPU_Go_Shattle.png)
+
+![Go debugger — I/O state and peripheral access event](images/Autograf-882-Debugger_PIO_Go_Shattle.png)
+
 ### Sensors & Diagnostics
 - CPU register panel with cycle counter (Rust & Go)
 - Stack display (8 words in Go, configurable)
-- DIP switch LEDs (PPI1 port A bits)
+- Plotter LEDs on PPI1.C bits PC2–PC5 (Go)
+- Keyboard matrix and X/Y limit/DIP input simulation (Go; Rust and JavaScript have their own input controls)
 - Session save/load to JSON file (Go)
 - Keyboard shortcuts: Space/→ Step, R Reset, F5 Run/Pause, B breakpoint, ? Help
 
@@ -97,16 +111,18 @@ cargo test -- --test-threads=1
 
 ```bash
 cd go
-go run ./cmd/aftograf
+./trygo.sh
 ```
 
-The Go version uses Fyne v2.5 for GUI. Requires a display server (X11/macOS/Wayland).
+`trygo.sh` builds the GUI, runs the verbose unit tests, reports the GUI smoke test and then starts the simulator. Close the window to finish the script. For a direct launch use `go run ./cmd/aftograf`. The Go version uses Fyne v2.5 and requires a display server (X11/macOS/Wayland).
 
 Tests:
 
 ```bash
 cd go
-go test -count=1 ./...
+go test ./...
+go test -race ./pkg/app
+go vet ./...
 ```
 
 ### Browser Version (`sim/`)
@@ -177,6 +193,8 @@ python3 -m http.server 8080
 | `?` | Open help (Go) / `?` / `/` (Rust) |
 | `Escape` | Close help/settings |
 | `J` | Jump PC (Rust only) |
+
+In the Go `I/O` tab, enable `Stop on peripheral access` to stop after the current instruction performs a peripheral read or write. The event description remains visible after the stop.
 
 ## License
 

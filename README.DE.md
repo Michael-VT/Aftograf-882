@@ -1,4 +1,4 @@
-# Autograf-882 Debug Simulator v1.0.15
+# Autograf-882 Debug Simulator v1.0.18
 
 ![Autograf-882 — Originalgerät](images/%D0%90%D0%B2%D1%82%D0%BE%D0%B3%D1%80%D0%B0%D1%84_882.01-1990.jpg)
 *Der originale Autograf-882 Flachbettplotter*
@@ -56,10 +56,24 @@
 - Empfangsprotokoll (letzte 20 Einträge)
 - TXRDY/RXRDY-Statusanzeigen
 
+### Go-GUI: Live-Hardware und E/A-Debugging
+- Der Tab `Debug` enthält CPU, Stack und Breakpoints
+- Der Tab `I/O` zeigt PPI1/PPI2, PIT, USART und externe Hardware in Spalten
+- Der Tab `Hardware` enthält eine 6×2-Tastaturmatrix, vier X/Y-Endschalter, vier DIP-Eingänge und die LEDs PPI1.C2–C5
+- Tasten, Endschalter und DIP-Eingänge können während der CPU-Ausführung geändert werden
+- `Stop on peripheral access` hält Go nach einer Instruktion an, die PPI, PIT oder USART verwendet
+- Die Ereigniszeile zeigt `READ/WRITE`, Adresse oder direkten Port, Wert, Gerät und Registerfunktion
+- Die Schaltfläche `?` im I/O-Tab erklärt die Peripherie-Adresskarte
+
+![Go: CPU, Disassembler, Speicher und A4-Plotter](images/Autograf-882-Debugger_CPU_Go_Shattle.png)
+
+![Go: I/O-Zustand und Peripherieereignis](images/Autograf-882-Debugger_PIO_Go_Shattle.png)
+
 ### Diagnose
 - CPU-Panel mit Taktzähler
 - Stack (8 Wörter in Go)
-- DIP-LEDs (PPI1 Port A)
+- Plotter-LEDs auf PPI1.C2–C5 (Go)
+- Simulation von 6×2-Tastatur, X/Y-Endschaltern und DIP-Eingängen (Go)
 - Sitzung speichern/laden als JSON (Go)
 - Tastaturkürzel: Leertaste/→ Schritt, R Reset, F5 Start/Pause, B Breakpoint, ? Hilfe
 
@@ -83,16 +97,18 @@ cargo test -- --test-threads=1
 
 ```bash
 cd go
-go run ./cmd/aftograf
+./trygo.sh
 ```
 
-Die Go-Version verwendet Fyne v2.5 für die GUI. Benötigt einen Anzeigeserver (X11/macOS/Wayland).
+`trygo.sh` baut die GUI, führt Unit- und GUI-Smoke-Tests aus und startet danach den Simulator. Für einen direkten Start: `go run ./cmd/aftograf`. Die Go-Version verwendet Fyne v2.5 und benötigt einen Anzeigeserver (X11/macOS/Wayland).
 
 Tests:
 
 ```bash
 cd go
 go test ./...
+go test -race ./pkg/app
+go vet ./...
 ```
 
 ### Browserversion
@@ -128,6 +144,8 @@ python3 -m http.server 8080
 | `F5` | Start / Pause |
 | `B` | Breakpoint |
 | `?` | Hilfe |
+
+Im Go-Tab `I/O` aktiviert `Stop on peripheral access` den Halt nach dem aktuellen Peripherie-Lese- oder Schreibzugriff. Die Beschreibung des letzten Zugriffs bleibt sichtbar.
 
 ---
 

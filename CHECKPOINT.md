@@ -1,6 +1,6 @@
 # Autograf-882 — Checkpoint
 
-**Date:** 2026-07-17  
+**Date:** 2026-07-20
 **State:** STABLE — Go v1.0.18, Rust v1.0.11
 
 ## Versions
@@ -8,7 +8,7 @@
 | Implementation | Version | Status |
 |---------------|---------|--------|
 | Rust (`rust/`) | v1.0.11 | STABLE — all bugs fixed, 37/37 tests |
-| Go (`go/`) | v1.0.18 | STABLE — vet-clean, all tests pass (35 CPU + 28 MMU + 3 disasm) |
+| Go (`go/`) | v1.0.18 | STABLE — `go test ./...`, race test and vet pass |
 
 ## Project Structure
 
@@ -36,16 +36,16 @@
 │   ├── go.mod / go.sum
 │   ├── cmd/aftograf/main.go
 │   ├── pkg/
-│   │   ├── app/app.go             717 lines — UI, layout, I/O routing
-│   │   ├── cpu/cpu.go             1249 lines — Intel 8080 CPU
-│   │   ├── memory/memory.go       190 lines — MMU (28 tests)
-│   │   ├── disasm/disasm.go       330 lines — Disassembler (3 tests)
-│   │   ├── plotter/plotter.go     210 lines — XY plotter
-│   │   ├── hpgl/hpgl.go           337 lines — HPGL parser
-│   │   ├── ppi8255/ppi8255.go     113 lines — K580VV55A
-│   │   ├── pit8253/pit8253.go     224 lines — K580VI53
-│   │   ├── usart8251/usart8251.go 197 lines — K580VV51A
-│   │   └── settings/settings.go   40 lines — Configuration
+│   │   ├── app/app.go             UI, layout, I/O routing, hardware controls
+│   │   ├── cpu/cpu.go             Intel 8080 CPU
+│   │   ├── memory/memory.go       MMU with ROM/RAM/I/O decode
+│   │   ├── disasm/disasm.go       Disassembler
+│   │   ├── plotter/plotter.go     XY plotter
+│   │   ├── hpgl/hpgl.go           HPGL parser
+│   │   ├── ppi8255/ppi8255.go     K580VV55A
+│   │   ├── pit8253/pit8253.go     K580VI53
+│   │   ├── usart8251/usart8251.go K580VV51A
+│   │   └── settings/settings.go   Configuration
 │   └── assets/firmware.bin
 ├── sim/                           ← Browser debug simulator (legacy)
 ├── docs/                          ← Documentation & datasheets
@@ -63,12 +63,14 @@
 - Memory viewer with color coding + click-to-edit bytes
 - CPU register card: compact grid layout, hex entry fields with OnSubmit
 - USART terminal with hex send + RX log
+- Hardware tab with live 6×2 keyboard matrix, X/Y limit switches, DIP inputs and PPI1.C2–C5 LEDs
+- Optional stop after a peripheral read/write, with a device/register access description in the I/O tab
 - HPGL parser + plotter with auto-scaling canvas
 - Keyboard shortcuts (Space, R, F5, B, ?)
 - Session save/load (JSON file dialogs)
 - Help dialog
 
-### Recent Fixes (v1.0.15)
+### Earlier Fixes (v1.0.15)
 - I/O routing → routes through MMU (`0xE000 | port`) instead of hardcoded PPI1-only
 - CPU layout → GridWithColumns(2) with constrained entries, no triple-SP
 - Register editing → all 6 entries (A/B/C/D/E/SP) wired with `OnSubmitted`
@@ -76,7 +78,7 @@
 - Memory colors → ROM/RAM/I/O color-coded byte buttons
 - USART → Send button parses hex and calls `ReceiveData()`
 
-### Recent Fixes (v1.0.18) — Instruction-indexed disassembly + UI fixes
+### Recent Fixes (v1.0.18) — Instruction-indexed disassembly, UI and hardware debugging
 - **Disassembly: linear sweep** — replaced fixed-size rows (2-byte then 1-byte) with
   `disasm.BuildInsnIndex()` — all instructions shown as complete rows regardless of length.
   No more misaligned decodes or garbage instructions in the listing.
@@ -87,6 +89,9 @@
   pair buttons (BC:XXXX, DE:XXXX) exactly.
 - `trygo.sh` forces fresh test runs with `go test -count=1` + clear PASS/FAIL summary.
 - Created `sim/tryjs.sh` for browser version.
+- Added live Go simulation controls for the keyboard, limit switches, DIP inputs and plotter LEDs.
+- Added a peripheral-access callback and the Go I/O breakpoint with READ/WRITE event details.
+- Added the Go CPU and I/O checkpoint screenshots under `images/`.
 ### Known Issues
 1. I/O device stubs simplified (no real PIT counting, PPI modes)
 2. USART interrupt is single RST 7 — no multi-vector
@@ -110,6 +115,8 @@
 ## How to Run
 
 ```bash
-cd go   && go run ./cmd/aftograf     # Go version
+cd go   && ./trygo.sh                # Go: build, tests, GUI smoke test and launch
 cd rust && cargo run --release       # Rust version
 ```
+
+For a Go build without launching the GUI, use `go build ./cmd/aftograf`. The browser implementation is served from the repository root with `python3 -m http.server 8080`, then open `/sim/`.
