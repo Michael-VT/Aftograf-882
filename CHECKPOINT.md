@@ -92,6 +92,8 @@
 - Added live Go simulation controls for the keyboard, limit switches, DIP inputs and plotter LEDs.
 - Added a peripheral-access callback and the Go I/O breakpoint with READ/WRITE event details.
 - Added the Go CPU and I/O checkpoint screenshots under `images/`.
+- Fixed the JavaScript HPGL loader to handle stateful `PU/PD`, absolute `PA` and relative `PR` coordinates.
+- Added Node HPGL regression tests to `sim/tryjs.sh` and rebuilt the browser bundle.
 ### Known Issues
 1. I/O device stubs simplified (no real PIT counting, PPI modes)
 2. USART interrupt is single RST 7 — no multi-vector

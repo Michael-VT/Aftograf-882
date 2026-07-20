@@ -135,6 +135,8 @@ cd sim && ./tryjs.sh
 python3 -m http.server 8080
 # Open http://localhost:8080/sim/
 ```
+
+`tryjs.sh` rebuilds the bundle, runs HPGL regression tests for `PU/PD`, `PA` and `PR` files, and then starts the local server.
 ![Autograf-882 Debug Simulator (JS)](images/Aftograf-882-Debuger.png)
 *Browser-based debugger simulator (JavaScript)*
 

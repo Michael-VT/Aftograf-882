@@ -8,6 +8,7 @@ const files = [
   'settings.js',
   'memory.js',
   'cpu8080.js',
+  'hpgl.js',
   'main.js',
 ];
 

@@ -8,6 +8,7 @@
 import { CPU8080 } from './cpu8080.js';
 import { MMU } from './memory.js';
 import { SettingsManager, DEFAULTS } from './settings.js';
+import { parseHPGL } from './hpgl.js';
 const PEN_COLORS = [
   { name: 'Чёрный',   stroke: '#000000' },
   { name: 'Красный',  stroke: '#cc0000' },
@@ -2259,70 +2260,25 @@ class App {
     reader.onload = (e) => {
       try {
         const text = e.target.result;
-        const cmds = text.split(';').map(s => s.trim()).filter(s => s.length > 0);
+        const parsed = parseHPGL(text);
+        const cmds = parsed.commands;
         // Reset plotter
         this.plotter.reset();
         this.plotter.clearLines();
-        let penDown = false;
-        let penNum = 0;
-        let x = 0, y = 0;
-        // HPGL units → plotter coordinate scale
-        // Find bounds for auto-scaling
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        const coords = [];
-        for (const cmd of cmds) {
-          const m = cmd.match(/^([A-Z]{2,3})\s*(.*)$/);
-          if (!m) continue;
-          const op = m[1];
-          const args = m[2].trim();
-          if (op === 'PU' || op === 'PD') {
-            const nums = args.split(/[\s,]+/).filter(s => s.length > 0).map(Number);
-            for (let i = 0; i + 1 < nums.length; i += 2) {
-              const cx = nums[i], cy = nums[i+1];
-              coords.push({ x: cx, y: cy, cmd: op, pen: penNum });
-              if (cx < minX) minX = cx; if (cx > maxX) maxX = cx;
-              if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
-            }
-          } else if (op === 'SP') {
-            penNum = Math.min(6, Math.max(0, parseInt(args) - 1));
-          }
-          // IN — handled via initial reset above
-        }
-        const rangeX = maxX - minX || 1;
-        const rangeY = maxY - minY || 1;
-        const scale = 1000 / Math.max(rangeX, rangeY);
-        const ox = 100, oy = 100; // offset to center on plotter
+        const coords = parsed.coordinates;
+        // Keep the original HPGL units. The canvas already auto-fits them,
+        // while the memory-backed plotter state should retain real positions.
+        const scale = 1;
+        const ox = 0, oy = 0;
         const hpglAddr = (name) => this.settings.getAddr(name);
         // Init HPGL display state
         this.hpglTotal = coords.length;
         this.hpglCurrent = 0;
         // Check mode
-        // Build reference segments (original coords, will be scaled during render)
-        this._hpglRefSegments = [];
-        let refPenDown = false;
-        let refPenNum = 0;
-        let refX = 0, refY = 0;
-        for (const pt of coords) {
-          if (pt.cmd === 'PD' && refPenDown) {
-            if (this._hpglRefSegments.length > 0) {
-              const last = this._hpglRefSegments[this._hpglRefSegments.length - 1];
-              if (last.pen === refPenNum) {
-                last.x2 = pt.x; last.y2 = pt.y;
-              } else {
-                this._hpglRefSegments.push({ x1: refX, y1: refY, x2: pt.x, y2: pt.y, pen: refPenNum });
-              }
-            } else {
-              this._hpglRefSegments.push({ x1: refX, y1: refY, x2: pt.x, y2: pt.y, pen: refPenNum });
-            }
-          } else if (pt.cmd === 'PD' && !refPenDown) {
-            refPenDown = true;
-            this._hpglRefSegments.push({ x1: refX, y1: refY, x2: pt.x, y2: pt.y, pen: refPenNum });
-          } else if (pt.cmd === 'PU') {
-            refPenDown = false;
-          }
-          refX = pt.x; refY = pt.y;
-          if (pt.cmd === 'SP') refPenNum = pt.pen;
-        }
+        this.hpglCmds = cmds.map(cmd => cmd.raw);
+        // Reference and direct rendering now use the same parsed segments and
+        // the same HPGL coordinate system, so the overlay cannot drift.
+        this._hpglRefSegments = parsed.segments;
         const uartMode = this.els.hpglUartMode?.checked;
         if (uartMode) {
           // UART mode: send HPGL as raw text to USART, CPU runs firmware

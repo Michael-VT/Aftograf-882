@@ -119,9 +119,13 @@ go vet ./...
 `sim/` — старая версия для браузера:
 
 ```bash
+cd sim && ./tryjs.sh
+# Или вручную:
 python3 -m http.server 8080
 # Открой http://localhost:8080/sim/
 ```
+
+`tryjs.sh` пересобирает bundle, запускает регрессионные тесты HPGL для команд `PU/PD`, `PA` и `PR`, а затем запускает локальный сервер.
 
 ![Отладчик-симулятор Автограф-882 (JS)](images/Aftograf-882-Debuger.png)
 *Браузерный отладчик-симулятор (JavaScript)*

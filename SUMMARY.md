@@ -38,7 +38,8 @@
 - GUI framework: Fyne v2.5.3
 
 ### Browser (sim/) — Legacy
-- JavaScript-based, 143 unit tests
+- JavaScript-based legacy debugger
+- Node HPGL regression tests for absolute/relative coordinates and common plotter command forms
 - Full 8080 CPU + memory + plotter + disassembler
 - Older, less maintained
 

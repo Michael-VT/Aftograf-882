@@ -8,7 +8,7 @@ node build.js 2>&1
 
 echo ""
 echo "=== Тестирование ==="
-echo "JS-версия не имеет автоматических тестов."
+node hpgl.test.mjs
 echo "Откройте в браузере: http://localhost:8080/sim/"
 echo ""
 echo "=== Запуск HTTP-сервера ==="

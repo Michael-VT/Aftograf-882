@@ -116,9 +116,13 @@ go vet ./...
 `sim/` — ältere Browserversion:
 
 ```bash
+cd sim && ./tryjs.sh
+# Oder manuell:
 python3 -m http.server 8080
 # Öffne http://localhost:8080/sim/
 ```
+
+`tryjs.sh` baut das Bundle neu, führt HPGL-Regressionstests für `PU/PD`, `PA` und `PR` aus und startet danach den lokalen Server.
 
 ## Projektstruktur
 
